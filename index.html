@@ -634,6 +634,46 @@ html, body {
 .pulse-bar {
   animation: pulseBar 1.5s ease-in-out;
 }
+
+/* Attribution table — clickable rows that jump to mock-data entity */
+.attribution-table tr.clickable {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.attribution-table tr.clickable:hover {
+  background-color: #fff7ed;
+}
+.attribution-table tr.clickable:hover .row-link-icon {
+  opacity: 1;
+  transform: translateX(2px);
+}
+.attribution-table tr.clickable:focus {
+  outline: 2px solid #d4a017;
+  outline-offset: -2px;
+  background-color: #fff7ed;
+}
+.row-link-icon {
+  display: inline-block;
+  margin-left: 6px;
+  color: #d4a017;
+  font-weight: 700;
+  opacity: 0.5;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.row-link-target {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  color: #888;
+  font-style: italic;
+  opacity: 0.7;
+}
+.row-link-disabled {
+  display: inline-block;
+  margin-left: 6px;
+  color: #ccc;
+  font-size: 10px;
+}
 </style>
 
 <script>
@@ -2488,11 +2528,12 @@ const EV_BRIDGE_BASELINE = {
   closing: 115,
 };
 
-// VNB baseline: actual $8m, plan $10m, miss -$2m.
+// VNB baseline. Updated for v1's assumption_change=0 driver: only the 4
+// entity-mapped drivers contribute, so baseline miss is -$1.1m (was -$2.0m).
 const VNB_BASELINE = {
-  actual: 8,
+  actual: 8.9,
   plan: 10,
-  miss: -2,
+  miss: -1.1,
 };
 
 // 5 VNB-attribution drivers. Each carries:
@@ -2503,11 +2544,17 @@ const VNB_BASELINE = {
 // Important — drivers don't sum to -$2m by themselves ($2.4m of |impact| total);
 // the 12.5% "Agent Average Case Size" +$0.2m tailwind offsets part of the drag.
 const VNB_DRIVERS_BASELINE = [
-  { key: "assumption_change", label: "Assumption Change Impact", impact: -0.9, leverKey: "mixPp",         scale: 20,  sign: -1, group: "primary", description: "Operating model assumption revisions (mortality, lapse, expenses). Pulled down by product-mix shift away from UL — a more capital-intensive book carries higher discount-rate uncertainty." },
-  { key: "agent_count",      label: "Active Agent Count",      impact: -0.6, leverKey: "churnPct",      scale: 30,  sign: -1, group: "primary", description: "Agency agent count above 30% baseline churn → shrunk salesforce → fewer policies sold. Each +1pp of churn above baseline costs ~$20K VNB." },
-  { key: "business_mix",      label: "Business Mix",            impact: -0.4, leverKey: "mixPp",         scale: 20,  sign: -1, group: "primary", description: "Shift away from UL toward participating / protection business. UL earns the highest margin (25%) so any reduction drags blended margin." },
-  { key: "activity_ratio",    label: "Agent Activity Ratio",    impact: -0.3, leverKey: "productivityPct", scale: 30, sign: -1, group: "primary", description: "Lower per-agent activity (cases per quarter). Productivity uplift improves both the count of policies and the activity ratio." },
-  { key: "case_size",         label: "Agent Average Case Size", impact:  0.2, leverKey: "productivityPct", scale: 30, sign: +1, group: "primary", description: "Average premium per case. Higher productivity → higher case size (better agents write larger policies). Acts as a tailwind against the drag." },
+  // Assumption Change is HARD-CODED to 0 — it does not respond to the operational levers in
+  // this v1 demo. Source data for assumption changes sits in the actuarial model (mortality,
+  // lapse, expense tables) and is not exposed in the ontology's operational entity layer.
+  // Removing it from the live attribution makes the 4 remaining drivers tie directly to
+  // mock-data entities the user can drill into (Distribution Channel, Agent, Channel
+  // Product Mix, Insurance Product).
+  { key: "assumption_change", label: "Assumption Change Impact", impact: 0,   leverKey: null, scale: 0, sign: 0, group: "primary", sourceEntity: null,             description: "Assumption-change impact is held at 0 in v1 — actuarial-model output, not exposed in the operational entity layer." },
+  { key: "agent_count",      label: "Active Agent Count",      impact: -0.6, leverKey: "churnPct",      scale: 30,  sign: -1, group: "primary", sourceEntity: "distribution_channel", description: "Agency agent count above 30% baseline churn → shrunk salesforce → fewer policies sold. Each +1pp of churn above baseline costs ~$20K VNB." },
+  { key: "business_mix",      label: "Business Mix",            impact: -0.4, leverKey: "mixPp",         scale: 20,  sign: -1, group: "primary", sourceEntity: "channel_product_mix", description: "Shift away from UL toward participating / protection business. UL earns the highest margin (25%) so any reduction drags blended margin." },
+  { key: "activity_ratio",    label: "Agent Activity Ratio",    impact: -0.3, leverKey: "productivityPct", scale: 30, sign: -1, group: "primary", sourceEntity: "agent",              description: "Lower per-agent activity (cases per quarter). Productivity uplift improves both the count of policies and the activity ratio." },
+  { key: "case_size",         label: "Agent Average Case Size", impact:  0.2, leverKey: "productivityPct", scale: 30, sign: +1, group: "primary", sourceEntity: "insurance_product",  description: "Average premium per case. Higher productivity → higher case size (better agents write larger policies). Acts as a tailwind against the drag." },
 ];
 
 // Sub-drivers under each primary driver. Actuarial assumptions + commission / expense levers.
@@ -2598,6 +2645,11 @@ function computeVnbAttribution({ churnPct, productivityPct, mixPp }) {
   };
 
   const drivers = VNB_DRIVERS_BASELINE.map((d) => {
+    // Drivers with no sourceEntity (assumption_change) are hard-coded to 0 — they
+    // don't respond to levers and aren't included in attribution rollups.
+    if (!d.sourceEntity) {
+      return { ...d, impact: 0, subDrivers: [] };
+    }
     const movement = adverseMovements[d.leverKey];
     const sensitivity = sensitivities[d.key] || 0.04;
     // Adverse lever movement makes VNB worse — drivers all move in the -VNB direction
@@ -3174,6 +3226,7 @@ async function main() {
       renderBridge(document.getElementById("ev-bridge"), bridge);
       renderRadial(document.getElementById("vnb-radial"), bridge);
       updateAttributionTable(bridge.attribution);
+      updateEvKpis(bridge);
     },
   });
 
@@ -3182,6 +3235,7 @@ async function main() {
   renderBridge(document.getElementById("ev-bridge"), initialBridge);
   renderRadial(document.getElementById("vnb-radial"), initialBridge);
   updateAttributionTable(initialBridge.attribution);
+  updateEvKpis(initialBridge);
 
   // Wire "Total VNB → EV bridge" link from the what-if panel
   wireVnbLink();
@@ -3223,6 +3277,19 @@ function wireVnbLink() {
   });
 }
 
+function updateEvKpis(bridge) {
+  const planEl = document.getElementById("vnb-plan");
+  const actualEl = document.getElementById("vnb-actual");
+  const missEl = document.getElementById("vnb-miss");
+  if (!planEl || !actualEl || !missEl) return;
+  const fmt = (n) => `${n < 0 ? "−" : ""}$${Math.abs(n).toFixed(1)}m`;
+  planEl.textContent = fmt(bridge.planVnb);
+  actualEl.textContent = fmt(bridge.vnbActual);
+  missEl.textContent = fmt(bridge.vnbVariance);
+  missEl.classList.toggle("neg", bridge.vnbVariance < 0);
+  missEl.classList.toggle("pos", bridge.vnbVariance > 0);
+}
+
 function updateAttributionTable(attribution) {
   const tbody = document.getElementById("attr-tbody");
   const foot = document.getElementById("attr-foot");
@@ -3232,13 +3299,43 @@ function updateAttributionTable(attribution) {
     const tr = document.createElement("tr");
     const sign = d.impact > 0 ? "+" : (d.impact < 0 ? "−" : "");
     const impactAbs = Math.abs(d.impact);
-    tr.innerHTML = `
-      <td>${d.label}</td>
-      <td class="num ${d.impact < 0 ? "neg" : "pos"}">${sign}$${impactAbs.toFixed(2)}m</td>
-      <td class="num">${(d.attributionPct * 100).toFixed(1)}%</td>
-    `;
+    const clickable = !!d.sourceEntity;
+    if (clickable) {
+      tr.classList.add("clickable");
+      tr.title = `Drill into mock data → ${d.sourceEntity}`;
+      tr.dataset.targetEntity = d.sourceEntity;
+      tr.setAttribute("role", "button");
+      tr.setAttribute("tabindex", "0");
+      tr.innerHTML = `
+        <td><span class="row-name">${d.label}</span><span class="row-link-icon" aria-hidden="true">→</span><span class="row-link-target">${d.sourceEntity}</span></td>
+        <td class="num ${d.impact < 0 ? "neg" : "pos"}">${sign}$${impactAbs.toFixed(2)}m</td>
+        <td class="num">${(d.attributionPct * 100).toFixed(1)}%</td>
+      `;
+    } else {
+      tr.innerHTML = `
+        <td><span class="row-name">${d.label}</span><span class="row-link-disabled" title="No mock-data entity exposed for this driver">·</span></td>
+        <td class="num ${d.impact < 0 ? "neg" : "pos"}">${sign}$${impactAbs.toFixed(2)}m</td>
+        <td class="num">${(d.attributionPct * 100).toFixed(1)}%</td>
+      `;
+    }
     tbody.appendChild(tr);
   }
+  // Click + keyboard activation: jump to mock-data entity in the graph + inspector
+  const jumpToEntity = (entityId) => {
+    if (!entityId) return;
+    focusNode(entityId);
+    const node = nodes.find((n) => n.id === entityId);
+    if (node) buildInspector({ node, ontology, samplesByEntity, derived });
+  };
+  tbody.querySelectorAll("tr.clickable").forEach((tr) => {
+    tr.addEventListener("click", () => jumpToEntity(tr.dataset.targetEntity));
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        jumpToEntity(tr.dataset.targetEntity);
+      }
+    });
+  });
   const sign = attribution.totalMiss > 0 ? "+" : (attribution.totalMiss < 0 ? "−" : "");
   foot.innerHTML = `<td>Total</td><td class="num ${attribution.totalMiss < 0 ? "neg" : "pos"}">${sign}$${Math.abs(attribution.totalMiss).toFixed(2)}m</td><td class="num">100.0%</td>`;
 }
