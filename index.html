@@ -31,7 +31,7 @@
 html, body {
   margin: 0;
   padding: 0;
-  height: 100%;
+  min-height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -78,6 +78,7 @@ html, body {
   padding: 16px;
   height: calc(100vh - 60px - 380px);
   min-height: 360px;
+  max-height: 720px;
 }
 
 .graph-pane {
@@ -235,15 +236,6 @@ html, body {
   margin: 0 16px 16px 16px;
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-}
-
-.layout {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 16px;
-  padding: 16px;
-  height: calc(100vh - 60px - 380px);
-  min-height: 360px;
 }
 
 .whatif-header {
@@ -544,6 +536,11 @@ html, body {
 #ev-bridge, #vnb-radial {
   width: 100%;
   min-height: 360px;
+}
+#ev-bridge svg.bridge-svg, #vnb-radial svg.radial-svg {
+  display: block;
+  height: 360px;
+}
 }
 .attribution-table {
   width: 100%;
@@ -2798,7 +2795,7 @@ function renderBridge(mountEl, data) {
   const x = (i) => PAD_L + (i / (data.waterfall.length - 1)) * innerW;
   const y = (v) => PAD_T + innerH - (v / yMax) * innerH;
 
-  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", height: "auto", class: "bridge-svg" });
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "xMidYMid meet", width: "100%", class: "bridge-svg" });
 
   // Background
   svg.appendChild(el("rect", { x: 0, y: 0, width: W, height: H, fill: "#0f1520" }));
@@ -2925,7 +2922,7 @@ function renderRadial(mountEl, bridgeData) {
   const rOuter = 175;
   const rCenter = 38;
 
-  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", height: "auto", class: "radial-svg" });
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "xMidYMid meet", width: "100%", class: "radial-svg" });
 
   // Background
   svg.appendChild(el("rect", { x: 0, y: 0, width: W, height: H, fill: "#0f1520" }));
