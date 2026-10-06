@@ -586,6 +586,51 @@ html, body {
 @media (max-width: 1100px) {
   .ev-grid { grid-template-columns: 1fr; }
 }
+
+/* VNB link — clickable bridge between KPI panel and EV bridge panel */
+.delta-link {
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+.delta-link::after {
+  content: " ↓";
+  font-size: 10px;
+  opacity: 0.4;
+  margin-left: 2px;
+  display: inline-block;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.delta-link:hover {
+  background-color: #fff7ed;
+  box-shadow: 0 0 0 1px #d4a017;
+}
+.delta-link:hover::after {
+  opacity: 0.9;
+  transform: translateY(2px);
+}
+
+@keyframes pulseFocus {
+  0%   { box-shadow: 0 0 0 0 rgba(212, 160, 23, 0.6); }
+  40%  { box-shadow: 0 0 0 8px rgba(212, 160, 23, 0.25); }
+  100% { box-shadow: 0 0 0 14px rgba(212, 160, 23, 0); }
+}
+[data-ev-kpis].pulse-focus {
+  animation: pulseFocus 1.5s ease-out;
+  border-radius: 6px;
+}
+
+@keyframes pulseBar {
+  0%, 100% { stroke: #2a8c70; stroke-width: 0; opacity: 0.92; }
+  50%      { stroke: #d4a017; stroke-width: 3; opacity: 1; }
+}
+.pulse-bar {
+  animation: pulseBar 1.5s ease-in-out;
+}
 </style>
 
 <script>
@@ -1633,7 +1678,7 @@ function zu(){return zu=Object.assign||function(g){for(var t=1;t<arguments.lengt
           </div>
           <div class="delta-cell">
             <span class="delta-label">Total VNB</span>
-            <span class="delta-val" id="d-vnb">$11.08M</span>
+            <a href="#ev-bridge" class="delta-val delta-link" id="d-vnb" data-link-target="ev-bridge" aria-label="Jump to EV bridge VNB bar">$11.08M</a>
           </div>
           <div class="delta-cell">
             <span class="delta-label">Overall VNB Margin</span>
@@ -1665,13 +1710,13 @@ function zu(){return zu=Object.assign||function(g){for(var t=1;t<arguments.lengt
       <p class="delta-narration" id="d-narration">Baseline — at xlsx reference state.</p>
     </div>
 
-    <section class="ev-panel" aria-label="EV bridge and VNB attribution">
+    <section class="ev-panel" aria-label="EV bridge and VNB attribution" id="ev-panel">
       <div class="ev-header">
         <div>
           <h2>EV Bridge &amp; VNB Attribution</h2>
           <p class="ev-hint">Walk the EV waterfall from opening to closing — drill into the VNB miss to see which operational lever is hurting the most.</p>
         </div>
-        <div class="ev-kpis" id="ev-kpis">
+        <div class="ev-kpis" id="ev-kpis" data-ev-kpis>
           <div class="ev-kpi"><span class="kpi-label">VNB Plan</span><span class="kpi-val" id="vnb-plan">$10.0m</span></div>
           <div class="ev-kpi"><span class="kpi-label">VNB Actual</span><span class="kpi-val" id="vnb-actual">$8.0m</span></div>
           <div class="ev-kpi"><span class="kpi-label">Plan Miss</span><span class="kpi-val neg" id="vnb-miss">−$2.0m</span></div>
@@ -3135,9 +3180,44 @@ async function main() {
   renderRadial(document.getElementById("vnb-radial"), initialBridge);
   updateAttributionTable(initialBridge.attribution);
 
+  // Wire "Total VNB → EV bridge" link from the what-if panel
+  wireVnbLink();
+
   // Paint baseline inspector on the most "money" node for first impression
   const defaultNode = nodes.find((n) => n.id === "vnb_summary") || nodes[0];
   buildInspector({ node: defaultNode, ontology, samplesByEntity, derived });
+}
+
+// Make the Total VNB cell in the upper panel a scroll-to link that pulses the EV bridge VNB bar.
+// Click → smooth scroll to EV panel → pulse VNB KPI strip + VNB waterfall bar for 1.5s.
+function wireVnbLink() {
+  const link = document.getElementById("d-vnb");
+  const evPanel = document.getElementById("ev-panel");
+  const evKpis = document.querySelector("[data-ev-kpis]");
+  if (!link || !evPanel) return;
+
+  link.addEventListener("click", (e) => {
+    e.preventDefault();
+    evPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    // Pulse the VNB KPI strip (Plan/Actual/Miss tiles)
+    if (evKpis) {
+      evKpis.classList.remove("pulse-focus");
+      // force reflow so re-adding the class restarts the animation
+      void evKpis.offsetWidth;
+      evKpis.classList.add("pulse-focus");
+      setTimeout(() => evKpis.classList.remove("pulse-focus"), 1500);
+    }
+
+    // Pulse the VNB bar in the waterfall (the 2nd bar, index 1)
+    const vnbBar = document.querySelector("#ev-bridge svg rect:nth-of-type(2)");
+    if (vnbBar) {
+      vnbBar.classList.remove("pulse-bar");
+      void vnbBar.offsetWidth;
+      vnbBar.classList.add("pulse-bar");
+      setTimeout(() => vnbBar.classList.remove("pulse-bar"), 1500);
+    }
+  });
 }
 
 function updateAttributionTable(attribution) {
