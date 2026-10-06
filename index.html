@@ -2722,15 +2722,18 @@ function computeVnbAttribution({ churnPct, productivityPct, mixPp }) {
   };
 }
 
-function computeEvBridge({ churnPct, productivityPct, mixPp } = {}) {
+function computeEvBridge({ churnPct, productivityPct, mixPp, vnbPlanOverride } = {}) {
   // Compute VNB attribution if levers are provided
   const attr = (churnPct !== undefined)
     ? computeVnbAttribution({ churnPct, productivityPct, mixPp })
     : null;
   const vnbActual = attr ? attr.actual : EV_BRIDGE_BASELINE.components[0].value;
-  const vnbVariance = vnbActual - EV_BRIDGE_BASELINE.vnbPlan;
+  // VNB Plan tracks the Model View Total VNB (upper "Model View" KPI strip) so the
+  // bridge's gold reference marker moves in sync with the model view.
+  const vnbPlan = (typeof vnbPlanOverride === "number") ? vnbPlanOverride : EV_BRIDGE_BASELINE.vnbPlan;
+  const vnbVariance = vnbActual - vnbPlan;
   const components = [
-    { ...EV_BRIDGE_BASELINE.components[0], value: vnbActual, planValue: EV_BRIDGE_BASELINE.vnbPlan, variance: vnbVariance },
+    { ...EV_BRIDGE_BASELINE.components[0], value: vnbActual, planValue: vnbPlan, variance: vnbVariance },
     ...EV_BRIDGE_BASELINE.components.slice(1),
   ];
   const opening = EV_BRIDGE_BASELINE.opening;
@@ -2743,7 +2746,7 @@ function computeEvBridge({ churnPct, productivityPct, mixPp } = {}) {
     waterfall.push({ ...c, running });
   }
   waterfall.push({ key: "closing", label: "Closing EV", value: running, type: "total", running });
-  return { opening, closing: running, planVnb: EV_BRIDGE_BASELINE.vnbPlan, vnbActual, vnbVariance, components, waterfall, attribution: attr };
+  return { opening, closing: running, planVnb: vnbPlan, vnbActual, vnbVariance, components, waterfall, attribution: attr };
 }
 
 function getCurrentTotals() { return totals; }
@@ -3250,20 +3253,22 @@ async function main() {
     engine: null, // not used in v1; levers call engine.applyLevers directly
     getBaseline: () => baselineSnapshot,
     onChange: ({ churnPct, productivityPct, mixPp }) => {
-      const bridge = computeEvBridge({ churnPct, productivityPct, mixPp });
+      const totals = getCurrentTotals();
+      const bridge = computeEvBridge({ churnPct, productivityPct, mixPp, vnbPlanOverride: totals?.totalVnb });
       renderBridge(document.getElementById("ev-bridge"), bridge);
       renderRadial(document.getElementById("vnb-radial"), bridge);
       updateAttributionTable(bridge.attribution);
-      updateEvKpis(bridge);
+      updateEvKpis(bridge, totals);
     },
   });
 
   // Initial paint at default levers
-  const initialBridge = computeEvBridge({ churnPct: 30, productivityPct: 0, mixPp: 0 });
+  const initialTotalsView = getCurrentTotals();
+  const initialBridge = computeEvBridge({ churnPct: 30, productivityPct: 0, mixPp: 0, vnbPlanOverride: initialTotalsView?.totalVnb });
   renderBridge(document.getElementById("ev-bridge"), initialBridge);
   renderRadial(document.getElementById("vnb-radial"), initialBridge);
   updateAttributionTable(initialBridge.attribution);
-  updateEvKpis(initialBridge);
+  updateEvKpis(initialBridge, initialTotalsView);
 
   // Wire "Total VNB → EV bridge" link from the what-if panel
   wireVnbLink();
@@ -3305,17 +3310,23 @@ function wireVnbLink() {
   });
 }
 
-function updateEvKpis(bridge) {
+// VNB Plan tracks the Model View Total VNB (the engine's gross computation from the
+// upper "Model View" KPI strip). VNB Baseline is the static xlsx realized reference
+// ($11.08M). Plan Miss = Plan − Baseline.
+function updateEvKpis(bridge, totals) {
   const planEl = document.getElementById("vnb-plan");
   const actualEl = document.getElementById("vnb-actual");
   const missEl = document.getElementById("vnb-miss");
   if (!planEl || !actualEl || !missEl) return;
   const fmt = (n) => `${n < 0 ? "−" : ""}$${Math.abs(n).toFixed(1)}m`;
-  planEl.textContent = fmt(bridge.planVnb);
+  // Prefer the live engine total (Model View) for Plan; fall back to bridge.planVnb.
+  const plan = (totals && typeof totals.totalVnb === "number") ? totals.totalVnb : bridge.planVnb;
+  planEl.textContent = fmt(plan);
   actualEl.textContent = fmt(bridge.vnbActual);
-  missEl.textContent = fmt(bridge.vnbVariance);
-  missEl.classList.toggle("neg", bridge.vnbVariance < 0);
-  missEl.classList.toggle("pos", bridge.vnbVariance > 0);
+  const variance = bridge.vnbActual - plan;
+  missEl.textContent = fmt(variance);
+  missEl.classList.toggle("neg", variance < 0);
+  missEl.classList.toggle("pos", variance > 0);
 }
 
 function updateAttributionTable(attribution) {
