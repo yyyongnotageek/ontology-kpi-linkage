@@ -2509,28 +2509,36 @@ function applyLevers({ churnPct, productivityPct, mixPp }) {
 // without committing to specific real company data.
 
 // Static baseline bridge components (between Open and Close).
-// Sum: 100 + 8 + 6 + 3 - 2 - 1 + 4 - 3 = 115 ✓
+// VNB first bar shows the BASELINE (VNB Summary 2025 actual = $11.08M); VNB Plan
+// ($13.27M, gross model view) is shown as a reference marker. Other components
+// scaled so the bridge still sums: 100 + 11.08 + (3.4 + 1.7 - 1.1 - 0.6 + 2.2 - 1.7) = 115 ✓
 const EV_BRIDGE_BASELINE = {
   opening: 100,
-  vnbPlan: 10,       // target / plan
+  vnbPlan: 13.27,    // target / plan (gross model view)
   components: [
-    { key: "vnb",                  label: "VNB",                              value: 8,  positive: true,  scope: "vnb" },
-    { key: "ifreturn",             label: "Exp. Return on In-Force",          value: 6,  positive: true },
-    { key: "anwreturn",            label: "Exp. Return on ANW",               value: 3,  positive: true },
-    { key: "opexpvar",             label: "Operating Experience Variance",    value: -2, positive: false },
-    { key: "opassumpchg",          label: "Operating Assumption Change",      value: -1, positive: false },
-    { key: "econvar",              label: "Economic Variances",               value: 4,  positive: true },
-    { key: "econassumpchg",        label: "Economic Assumption Change",       value: -3, positive: false },
+    { key: "vnb",                  label: "VNB",                              value: 11.08, positive: true,  scope: "vnb" },
+    { key: "ifreturn",             label: "Exp. Return on In-Force",          value: 3.4,   positive: true },
+    { key: "anwreturn",            label: "Exp. Return on ANW",               value: 1.7,   positive: true },
+    { key: "opexpvar",             label: "Operating Experience Variance",    value: -1.1,  positive: false },
+    { key: "opassumpchg",          label: "Operating Assumption Change",      value: -0.6,  positive: false },
+    { key: "econvar",              label: "Economic Variances",               value: 2.2,   positive: true },
+    { key: "econassumpchg",        label: "Economic Assumption Change",       value: -1.7,  positive: false },
   ],
   closing: 115,
 };
 
-// VNB baseline. Updated for v1's assumption_change=0 driver: only the 4
-// entity-mapped drivers contribute, so baseline miss is -$1.1m (was -$2.0m).
+// VNB baseline. Anchored to the VNB Summary 2025 xlsx figures:
+//   Plan    = $13.27M  (gross model view from the upper KPI strip — what the model
+//                       says VNB should be absent the expense ratio, risk-discount,
+//                       and cost-of-capital haircuts the ontology model doesn't yet
+//                       carry).
+//   Actual  = $11.08M  (realized reference from VNB Summary 2025, net of those
+//                       haircuts).
+//   Miss    = -$2.19M  (the haircut gap between model and realized).
 const VNB_BASELINE = {
-  actual: 8.9,
-  plan: 10,
-  miss: -1.1,
+  actual: 11.08,
+  plan: 13.27,
+  miss: -2.19,
 };
 
 // 5 VNB-attribution drivers. Each carries:
@@ -2547,11 +2555,15 @@ const VNB_DRIVERS_BASELINE = [
   // Removing it from the live attribution makes the 4 remaining drivers tie directly to
   // mock-data entities the user can drill into (Distribution Channel, Agent, Channel
   // Product Mix, Insurance Product).
-  { key: "assumption_change", label: "Assumption Change Impact", impact: 0,   leverKey: null, scale: 0, sign: 0, group: "primary", sourceEntity: null,             description: "Assumption-change impact is held at 0 in v1 — actuarial-model output, not exposed in the operational entity layer." },
-  { key: "agent_count",      label: "Active Agent Count",      impact: -0.6, leverKey: "churnPct",      scale: 30,  sign: -1, group: "primary", sourceEntity: "distribution_channel", description: "Agency agent count above 30% baseline churn → shrunk salesforce → fewer policies sold. Each +1pp of churn above baseline costs ~$20K VNB." },
-  { key: "business_mix",      label: "Business Mix",            impact: -0.4, leverKey: "mixPp",         scale: 20,  sign: -1, group: "primary", sourceEntity: "channel_product_mix", description: "Shift away from UL toward participating / protection business. UL earns the highest margin (25%) so any reduction drags blended margin." },
-  { key: "activity_ratio",    label: "Agent Activity Ratio",    impact: -0.3, leverKey: "productivityPct", scale: 30, sign: -1, group: "primary", sourceEntity: "agent",              description: "Lower per-agent activity (cases per quarter). Productivity uplift improves both the count of policies and the activity ratio." },
-  { key: "case_size",         label: "Agent Average Case Size", impact:  0.2, leverKey: "productivityPct", scale: 30, sign: +1, group: "primary", sourceEntity: "insurance_product",  description: "Average premium per case. Higher productivity → higher case size (better agents write larger policies). Acts as a tailwind against the drag." },
+  //
+  // Driver baselines sum to -$2.19M at default levers, matching VNB_BASELINE.miss. This way
+  // the math (actual = baseline + Δ where Δ = sumImpact - miss) gives actual = baseline at
+  // default levers, and actual moves down as drivers worsen.
+  { key: "assumption_change", label: "Assumption Change Impact", impact: 0,     leverKey: null, scale: 0, sign: 0, group: "primary", sourceEntity: null,             description: "Assumption-change impact is held at 0 in v1 — actuarial-model output, not exposed in the operational entity layer." },
+  { key: "agent_count",      label: "Active Agent Count",      impact: -1.036, leverKey: "churnPct",      scale: 30,  sign: -1, group: "primary", sourceEntity: "distribution_channel", description: "Agency agent count above 30% baseline churn → shrunk salesforce → fewer policies sold. Each +1pp of churn above baseline costs ~$35K VNB." },
+  { key: "business_mix",      label: "Business Mix",            impact: -0.691, leverKey: "mixPp",         scale: 20,  sign: -1, group: "primary", sourceEntity: "channel_product_mix", description: "Shift away from UL toward participating / protection business. UL earns the highest margin (25%) so any reduction drags blended margin." },
+  { key: "activity_ratio",    label: "Agent Activity Ratio",    impact: -0.518, leverKey: "productivityPct", scale: 30, sign: -1, group: "primary", sourceEntity: "agent",              description: "Lower per-agent activity (cases per quarter). Productivity uplift improves both the count of policies and the activity ratio." },
+  { key: "case_size",         label: "Agent Average Case Size", impact:  0.055, leverKey: "productivityPct", scale: 30, sign: +1, group: "primary", sourceEntity: "insurance_product",  description: "Average premium per case. Higher productivity → higher case size (better agents write larger policies). Small tailwind." },
 ];
 
 // Sub-drivers under each primary driver. Actuarial assumptions + commission / expense levers.
@@ -2824,8 +2836,27 @@ function renderBridge(mountEl, data) {
     }));
   }
 
-  // Bars
+  // Plan reference marker on the VNB bar: a dashed line at the Plan height
+  // so the user can see the gap between Plan ($13.27M gross) and Actual
+  // ($11.08M baseline) right on the first component bar.
   const barWidth = (innerW / (data.waterfall.length - 1)) * 0.6;
+  if (data.planVnb && data.waterfall[1] && data.waterfall[1].key === "vnb") {
+    const planY = y(data.planVnb);
+    const vnbCx = x(1);
+    svg.appendChild(el("line", {
+      x1: vnbCx - barWidth / 2 - 4,
+      x2: vnbCx + barWidth / 2 + 4,
+      y1: planY, y2: planY,
+      stroke: "#d4a017", "stroke-width": 2, "stroke-dasharray": "4,2",
+    }));
+    svg.appendChild(el("text", {
+      x: vnbCx + barWidth / 2 + 6, y: planY + 4,
+      fill: "#d4a017", "font-size": 10, "font-weight": "700",
+      "font-family": "ui-sans-serif, sans-serif",
+    }, [document.createTextNode(`Plan $${data.planVnb.toFixed(2)}m`)]));
+  }
+
+  // Bars
   data.waterfall.forEach((step, i) => {
     const cx = x(i);
     if (step.type === "total") {
