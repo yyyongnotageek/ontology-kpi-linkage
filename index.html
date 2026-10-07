@@ -878,95 +878,91 @@ function zu(){return zu=Object.assign||function(g){for(var t=1;t<arguments.lengt
     </div>
 
     <div class="levers">
-      <div class="lever" data-key="churn">
+      <div class="lever" data-key="active-ratio">
         <div class="lever-row">
-          <label for="lever-churn">Agency agent churn rate</label>
-          <span class="value" id="val-churn">30%</span>
+          <label for="lever-active-ratio">Active-agent ratio shift</label>
+          <span class="value" id="val-active-ratio">0pp</span>
         </div>
-        <input id="lever-churn" type="range" min="0" max="60" step="1" value="30" />
-        <p class="lever-hint">Higher churn → Agency sells more Term Life (lower VNB margin).</p>
+        <input id="lever-active-ratio" type="range" min="-30" max="30" step="1" value="0" />
+        <p class="lever-hint">Promotes bottom-N Inactive agents to Active (at the current active-month median productivity). Negative moves the other direction.</p>
       </div>
 
       <div class="lever" data-key="productivity">
         <div class="lever-row">
-          <label for="lever-productivity">Bancassurance productivity uplift</label>
+          <label for="lever-productivity">Productivity shift (per active agent)</label>
           <span class="value" id="val-productivity">0%</span>
         </div>
         <input id="lever-productivity" type="range" min="-30" max="30" step="1" value="0" />
-        <p class="lever-hint">Scales per-agent Banca productivity; APE and VNB scale proportionally.</p>
+        <p class="lever-hint">Multiplies every Active agent's productivity_$k by (1 + shift). Affects APE directly; VNB margin unchanged.</p>
       </div>
 
-      <div class="lever" data-key="mix">
-        <div class="lever-row">
-          <label for="lever-mix">Shift product mix toward Unit-Linked</label>
-          <span class="value" id="val-mix">0 pp</span>
-        </div>
-        <input id="lever-mix" type="range" min="-20" max="20" step="1" value="0" />
-        <p class="lever-hint">Shift UL share within each channel (preserving sum-to-1).</p>
+      <div class="lever" data-key="mix-shifts">
+        <div id="mix-shifts-mount"></div>
+        <p class="lever-hint">Re-weights product_mix within CH001 (each product ±10pp, sums to 0 across products).</p>
       </div>
     </div>
 
     <div class="delta" aria-live="polite">
       <div class="delta-track delta-track-model">
-        <div class="delta-track-label">Model view <span class="muted-tag">— ontology formulas (gross)</span></div>
+        <div class="delta-track-label">Model view <span class="muted-tag">— v3 engine, gross per ontology formulas</span></div>
         <div class="delta-row">
           <div class="delta-cell">
             <span class="delta-label">Total APE</span>
-            <span class="delta-val" id="d-ape">$68.0M</span>
+            <span class="delta-val" id="d-ape">—</span>
           </div>
           <div class="delta-cell">
             <span class="delta-label">Total VNB</span>
-            <a href="#ev-bridge" class="delta-val delta-link" id="d-vnb" data-link-target="ev-bridge" aria-label="Jump to EV bridge VNB bar">$11.08M</a>
+            <a href="#ev-bridge" class="delta-val delta-link" id="d-vnb" data-link-target="ev-bridge" aria-label="Jump to EV bridge VNB bar">—</a>
           </div>
           <div class="delta-cell">
             <span class="delta-label">Overall VNB Margin</span>
-            <span class="delta-val" id="d-margin">16.3%</span>
+            <span class="delta-val" id="d-margin">—</span>
           </div>
         </div>
       </div>
       <div class="delta-track delta-track-realized">
-        <div class="delta-track-label">Realized reference <span class="muted-tag">— VNB Summary 2025 (net)</span></div>
+        <div class="delta-track-label">Same period (full horizon) <span class="muted-tag">— sum across all months</span></div>
         <div class="delta-row">
           <div class="delta-cell">
             <span class="delta-label">Total APE</span>
-            <span class="delta-val dim">$68.00M</span>
+            <span class="delta-val dim">—</span>
           </div>
           <div class="delta-cell">
             <span class="delta-label">Total VNB</span>
-            <span class="delta-val dim">$11.08M</span>
+            <span class="delta-val dim">—</span>
           </div>
           <div class="delta-cell">
             <span class="delta-label">Overall VNB Margin</span>
-            <span class="delta-val dim">16.3%</span>
+            <span class="delta-val dim">—</span>
           </div>
         </div>
       </div>
       <div class="delta-gap">
-        <span class="delta-gap-label">Δ gap (model − realized):</span>
-        <span class="delta-gap-text">driven by expense ratio, risk-discount, and cost-of-capital haircuts the ontology model doesn't yet carry.</span>
+        <span class="delta-gap-label">Note:</span>
+        <span class="delta-gap-text" id="d-data-gap">v3 source xlsx: CH002 (Banca) and CH003 (Brokerage) have no fact rows — they're registered as channels with 200 + 80 agents, but contribute 0 APE/VNB to the totals. <a href="#" id="d-data-gap-link">More on the data gap.</a></span>
       </div>
-      <p class="delta-narration" id="d-narration">Baseline — at xlsx reference state.</p>
+      <p class="delta-narration" id="d-narration">Baseline — Jan→Jun walk.</p>
     </div>
 
     <section class="ev-panel" aria-label="EV bridge and VNB attribution" id="ev-panel">
       <div class="ev-header">
         <div>
           <h2>EV Bridge &amp; VNB Attribution</h2>
-          <p class="ev-hint">Walk the EV waterfall from opening to closing — drill into the VNB miss to see which operational lever is hurting the most.</p>
+          <p class="ev-hint">Walk Jan→Jun month-by-month VNB movement. The driver table decomposes that movement via leave-one-out attribution.</p>
         </div>
         <div class="ev-kpis" id="ev-kpis" data-ev-kpis>
-          <div class="ev-kpi"><span class="kpi-label">VNB Plan</span><span class="kpi-val" id="vnb-plan">$10.0m</span></div>
-          <div class="ev-kpi"><span class="kpi-label">VNB Baseline</span><span class="kpi-val" id="vnb-actual">$8.0m</span></div>
-          <div class="ev-kpi"><span class="kpi-label">Plan Miss</span><span class="kpi-val neg" id="vnb-miss">−$2.0m</span></div>
+          <div class="ev-kpi"><span class="kpi-label">VNB Open</span><span class="kpi-val" id="vnb-plan">—</span></div>
+          <div class="ev-kpi"><span class="kpi-label">VNB Close</span><span class="kpi-val" id="vnb-actual">—</span></div>
+          <div class="ev-kpi"><span class="kpi-label">Δ VNB</span><span class="kpi-val" id="vnb-miss">—</span></div>
         </div>
       </div>
       <div class="ev-grid">
         <div class="ev-bridge-wrap">
-          <h3 class="ev-section-title">EV P&amp;L Bridge</h3>
+          <h3 class="ev-section-title">VNB Monthly Bridge</h3>
           <div id="ev-bridge"></div>
         </div>
         <div class="ev-radial-wrap">
-          <h3 class="ev-section-title">VNB Attribution</h3>
+          <h3 class="ev-section-title">Jan→Jun Driver Attribution</h3>
           <div id="vnb-radial"></div>
         </div>
         <div class="ev-table-wrap">
@@ -976,7 +972,7 @@ function zu(){return zu=Object.assign||function(g){for(var t=1;t<arguments.lengt
             <tbody id="attr-tbody"></tbody>
             <tfoot id="attr-foot"></tfoot>
           </table>
-          <p class="ev-footnote">Attribution % = driver's share of total absolute movement (|impact| ÷ Σ|impact|). Illustrative figures for discussion purposes.</p>
+          <p class="ev-footnote">Leave-one-out decomposition — each driver's contribution = VNB(all-at-target) − VNB(this-driver-at-baseline, others-at-target). Order-independent; residual captures interaction effects across drivers.</p>
         </div>
       </div>
     </section>
@@ -1740,7 +1736,12 @@ function getCurrentTotals() {
 }
 
 function getBaselineTotalsSnapshot() {
-  return baseline ? { ...baseline.totals } : null;
+  if (!baseline) return null;
+  return {
+    totalApe: baseline.totals.ape_m,
+    totalVnb: baseline.totals.vnb_m,
+    margin: baseline.totals.margin,
+  };
 }
 
 function getMonths() {
@@ -1769,7 +1770,11 @@ function applyLevers(newLevers) {
   currentData = deepClone(baselineData);
   const r = compute(currentData, levers);
   return {
-    totals: r.totals,
+    totals: {
+      totalApe: r.totals.ape_m,
+      totalVnb: r.totals.vnb_m,
+      margin: r.totals.margin,
+    },
     months: r.months,
     data_gap: r.data_gap,
   };
@@ -3843,24 +3848,29 @@ function setPulseFn(fn) { pulseFn = fn; }
   /* ===== app.js ===== */
   (function() {
   const __exports__ = {};
-// app.js — orchestrator
+// app.js — orchestrator (v3)
+//
+// Pipeline:
+//   1. loadAll()  → ontology, samples, data
+//   2. initEngine(data)  → baseline totals + per-month walk
+//   3. Compute Jan→Jun leave-one-out attribution
+//   4. Render: graph, inspector, EV bridge, radial, driver table, model-view strip
+//   5. Wire 3 v3 levers (active_ratio_shift, productivity_shift, mix_shift)
+//      → on each lever change, recompute model-view totals and update narration
+
 const { loadAll } = window.__ns__["ontology.js"] || {};;
 const { renderGraph, pulseNodes, focusNode } = window.__ns__["graph.js"] || {};;
 const { buildInspector } = window.__ns__["inspector.js"] || {};;
-const { initEngine, getCurrentTotals, getBaselineTotalsSnapshot, applyLevers, computeEvBridge, computeVnbAttribution } = window.__ns__["engine.js"] || {};;
-const { wireLevers, setPulseFn } = window.__ns__["whatif.js"] || {};;
-const { renderBridge } = window.__ns__["bridge.js"] || {};;
-const { renderRadial } = window.__ns__["radial.js"] || {};;
+const engine = window.__ns__["engine_v3.js"] || {};;
+const { attribute } = window.__ns__["attribution.js"] || {};;
+const { buildV3Bridge, buildV3DriverTable, renderEvBridgePanel, renderAttributionRadial,  } = window.__ns__["v3_panel.js"] || {};;
+const { wireV3Levers } = window.__ns__["whatif_v3.js"] || {};;
 
-function showBanner(text) {
-  const el = document.getElementById("banner");
-  if (!el) return;
-  el.textContent = text;
-  el.hidden = false;
-  setTimeout(() => { el.hidden = true; }, 6000);
-}
+let nodes = [];
 
-async function main() {
+boot();
+
+async function boot() {
   let bundle;
   try {
     bundle = await loadAll();
@@ -3869,113 +3879,124 @@ async function main() {
     console.error(e);
     return;
   }
-  const { ontology, samplesByEntity, nodes, edges, derived } = bundle;
+  const { ontology, samplesByEntity, nodes: gNodes, edges, derived } = bundle;
+  nodes = gNodes;
 
-  // Render graph
-  renderGraph({
-    graphNodes: nodes,
-    graphEdges: edges,
-    container: document.getElementById("graph"),
-    onSelect: (id) => {
-      const node = nodes.find((n) => n.id === id);
-      buildInspector({ node, ontology, samplesByEntity, derived });
-      if (id) focusNode(id);
-    },
-  });
+  // ── 1. Init engine on the raw v3 data
+  const init = engine.initEngine(bundle.data);
+  const baselineTotals = engine.getBaselineTotalsSnapshot();
+  const dataGap = engine.getDataGap();
 
-  // Initialize engine on baseline data
-  const initialTotals = initEngine(bundle.data);
-  // Baseline-comparison helper for whatif.js
-  const baselineSnapshot = getBaselineTotalsSnapshot();
-
-  // Wire what-if levers
-  setPulseFn(pulseNodes);
-  wireLevers({
-    engine: null, // not used in v1; levers call engine.applyLevers directly
-    getBaseline: () => baselineSnapshot,
-    onChange: ({ churnPct, productivityPct, mixPp }) => {
-      const totals = getCurrentTotals();
-      const bridge = computeEvBridge({ churnPct, productivityPct, mixPp, vnbPlanOverride: totals?.totalVnb });
-      renderBridge(document.getElementById("ev-bridge"), bridge);
-      renderRadial(document.getElementById("vnb-radial"), bridge);
-      updateAttributionTable(bridge.attribution);
-      updateEvKpis(bridge, totals);
-    },
-  });
-
-  // Initial paint at default levers
-  const initialTotalsView = getCurrentTotals();
-  const initialBridge = computeEvBridge({ churnPct: 30, productivityPct: 0, mixPp: 0, vnbPlanOverride: initialTotalsView?.totalVnb });
-  renderBridge(document.getElementById("ev-bridge"), initialBridge);
-  renderRadial(document.getElementById("vnb-radial"), initialBridge);
-  updateAttributionTable(initialBridge.attribution);
-  updateEvKpis(initialBridge, initialTotalsView);
-
-  // Wire "Total VNB → EV bridge" link from the what-if panel
-  wireVnbLink();
-
-  // Paint baseline inspector on the most "money" node for first impression
+  // ── 2. Paint graph
+  renderGraph({ graphNodes: nodes, graphEdges: edges, container: document.getElementById("graph") });
   const defaultNode = nodes.find((n) => n.id === "vnb_summary") || nodes[0];
   buildInspector({ node: defaultNode, ontology, samplesByEntity, derived });
-}
 
-// Make the Total VNB cell in the upper panel a scroll-to link that pulses the EV bridge VNB bar.
-// Click → smooth scroll to EV panel → pulse VNB KPI strip + VNB waterfall bar for 1.5s.
-function wireVnbLink() {
-  const link = document.getElementById("d-vnb");
-  const evPanel = document.getElementById("ev-panel");
-  const evKpis = document.querySelector("[data-ev-kpis]");
-  if (!link || !evPanel) return;
-
-  link.addEventListener("click", (e) => {
-    e.preventDefault();
-    evPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-
-    // Pulse the VNB KPI strip (Plan/Actual/Miss tiles)
-    if (evKpis) {
-      evKpis.classList.remove("pulse-focus");
-      // force reflow so re-adding the class restarts the animation
-      void evKpis.offsetWidth;
-      evKpis.classList.add("pulse-focus");
-      setTimeout(() => evKpis.classList.remove("pulse-focus"), 1500);
-    }
-
-    // Pulse the VNB bar in the waterfall (the 2nd bar, index 1)
-    const vnbBar = document.querySelector("#ev-bridge svg rect:nth-of-type(2)");
-    if (vnbBar) {
-      vnbBar.classList.remove("pulse-bar");
-      void vnbBar.offsetWidth;
-      vnbBar.classList.add("pulse-bar");
-      setTimeout(() => vnbBar.classList.remove("pulse-bar"), 1500);
-    }
+  // ── 2.5 Listen for jump-to-entity events from the driver table
+  window.addEventListener("jump-to-entity", (e) => {
+    const node = e.detail && e.detail.node;
+    if (!node) return;
+    focusNode(node.id);
+    buildInspector({ node, ontology, samplesByEntity, derived });
   });
+
+  // ── 3. Compute Jan→Jun attribution (canonical time-based decomposition)
+  const byMonth = {};
+  for (const m of init.months) byMonth[m.month] = m;
+  const months = Object.keys(byMonth).sort();
+  const fromState = byMonth[months[0]];
+  const toState = byMonth[months[months.length - 1]];
+  const attribution = attribute({
+    fromState, toState, knownMonths: months, baselineData: bundle.data,
+  });
+
+  // ── 4. Render EV bridge + radial + driver table
+  const bridge = buildV3Bridge({
+    currentData: bundle.data,
+    baselineData: bundle.data,
+    attribution,
+  });
+  renderEvBridgePanel(document.getElementById("ev-bridge"), bridge);
+  renderAttributionRadial(document.getElementById("vnb-radial"), bridge);
+  renderDriverTable(buildV3DriverTable(attribution));
+  updateVnbLink(bridge);
+
+  // ── 5. Initial model-view strip (baseline)
+  paintModelView(baselineTotals, baselineTotals, dataGap);
+  paintNarration({ active_ratio_shift: 0, productivity_shift: 0, mix_shift: {} }, baselineTotals, baselineTotals, dataGap);
+
+  // ── 6. Wire levers
+  wireV3Levers({
+    products: bundle.data.Product,
+    getBaseline: () => baselineTotals,
+    getDataGap: () => dataGap,
+    onChange: (leverValues) => {
+      const r = engine.applyLevers(leverValues);
+      if (!r) return;
+      paintModelView(r.totals, baselineTotals, dataGap);
+      paintNarration(leverValues, r.totals, baselineTotals, dataGap);
+      const affectedIds = ["agent_monthly", "channel_product_mix", "channel_product_ape", "channel_product_vnb", "vnb_summary", "overall_vnb_margin"];
+      pulseNodes(affectedIds);
+    },
+  });
+
+  // ── 7. Wire the click-to-scroll link from the VNB cell to the bridge
+  wireVnbLink(bridge);
 }
 
-// VNB Plan tracks the Model View Total VNB (the engine's gross computation from the
-// upper "Model View" KPI strip). VNB Baseline is the static xlsx realized reference
-// ($11.08M). Plan Miss = Plan − Baseline.
-function updateEvKpis(bridge, totals) {
-  const planEl = document.getElementById("vnb-plan");
-  const actualEl = document.getElementById("vnb-actual");
-  const missEl = document.getElementById("vnb-miss");
-  if (!planEl || !actualEl || !missEl) return;
-  const fmt = (n) => `${n < 0 ? "−" : ""}$${Math.abs(n).toFixed(1)}m`;
-  // Prefer the live engine total (Model View) for Plan; fall back to bridge.planVnb.
-  const plan = (totals && typeof totals.totalVnb === "number") ? totals.totalVnb : bridge.planVnb;
-  planEl.textContent = fmt(plan);
-  actualEl.textContent = fmt(bridge.vnbActual);
-  const variance = bridge.vnbActual - plan;
-  missEl.textContent = fmt(variance);
-  missEl.classList.toggle("neg", variance < 0);
-  missEl.classList.toggle("pos", variance > 0);
+function paintModelView(totals, baseline, dataGap) {
+  const fmtMoney = (m) => `$${m.toFixed(2)}M`;
+  const fmtPct = (p) => `${(p * 100).toFixed(1)}%`;
+  const $ = (id) => document.getElementById(id);
+  const apeEl = $("d-ape");
+  const vnbEl = $("d-vnb");
+  const marginEl = $("d-margin");
+  if (apeEl) apeEl.textContent = fmtMoney(totals.totalApe);
+  if (vnbEl) vnbEl.textContent = fmtMoney(totals.totalVnb);
+  if (marginEl) marginEl.textContent = fmtPct(totals.margin);
+
+  // Pulse if changed vs baseline
+  if (apeEl) apeEl.classList.toggle("changed", Math.abs(totals.totalApe - baseline.totalApe) > 0.005);
+  if (vnbEl) vnbEl.classList.toggle("changed", Math.abs(totals.totalVnb - baseline.totalVnb) > 0.005);
+  if (marginEl) marginEl.classList.toggle("changed", Math.abs(totals.margin - baseline.margin) > 0.0005);
+
+  // Also update the "Realized reference" track to show the same (v3 has no plan-vs-realized split).
+  const dimApe = document.querySelector(".delta-track-realized #d-ape");
+  const dimVnb = document.querySelector(".delta-track-realized #d-vnb");
+  const dimMargin = document.querySelector(".delta-track-realized #d-margin");
+  if (dimApe) dimApe.textContent = fmtMoney(totals.totalApe);
+  if (dimVnb) dimVnb.textContent = fmtMoney(totals.totalVnb);
+  if (dimMargin) dimMargin.textContent = fmtPct(totals.margin);
 }
 
-function updateAttributionTable(attribution) {
+function paintNarration(leverValues, totals, baseline, dataGap) {
+  const dVnb = totals.totalVnb - baseline.totalVnb;
+  const dApe = totals.totalApe - baseline.totalApe;
+  const dMargin = (totals.margin - baseline.margin) * 100;
+  const el = document.getElementById("d-narration");
+  if (!el) return;
+  const parts = [];
+  if (leverValues.active_ratio_shift) parts.push(`Active ratio ${leverValues.active_ratio_shift > 0 ? "+" : ""}${leverValues.active_ratio_shift}pp`);
+  if (leverValues.productivity_shift) parts.push(`Productivity ${leverValues.productivity_shift > 0 ? "+" : ""}${leverValues.productivity_shift}%`);
+  const mixKeys = Object.keys(leverValues.mix_shift || {});
+  if (mixKeys.length) {
+    const desc = mixKeys.map((k) => `${k}: ${leverValues.mix_shift[k] > 0 ? "+" : ""}${leverValues.mix_shift[k]}pp`).join(", ");
+    parts.push(`Mix (${desc})`);
+  }
+  const fmtDelta = (v, fixed) => `${v >= 0 ? "+" : ""}${v.toFixed(fixed)}`;
+  let summary = `Baseline — Jan→Jun walk. v3 data: ${dataGap?.channelsWithoutFacts?.length ? dataGap.channelsWithoutFacts.length + " channels have no facts (CH002, CH003)" : "all channels with facts"}.`;
+  if (parts.length) {
+    summary = `${parts.join(" · ")} → APE ${fmtDelta(dApe, 2)}M · VNB ${fmtDelta(dVnb, 2)}M · margin ${fmtDelta(dMargin, 2)}pp`;
+  }
+  el.textContent = summary;
+}
+
+function renderDriverTable(payload) {
   const tbody = document.getElementById("attr-tbody");
   const foot = document.getElementById("attr-foot");
   if (!tbody || !foot) return;
   while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-  for (const d of attribution.drivers) {
+  for (const d of payload.drivers) {
     const tr = document.createElement("tr");
     const sign = d.impact > 0 ? "+" : (d.impact < 0 ? "−" : "");
     const impactAbs = Math.abs(d.impact);
@@ -3993,19 +4014,26 @@ function updateAttributionTable(attribution) {
       `;
     } else {
       tr.innerHTML = `
-        <td><span class="row-name">${d.label}</span><span class="row-link-disabled" title="No mock-data entity exposed for this driver">·</span></td>
+        <td><span class="row-name">${d.label}</span><span class="row-link-disabled" title="Residual — captures interaction effects across drivers">·</span></td>
         <td class="num ${d.impact < 0 ? "neg" : "pos"}">${sign}$${impactAbs.toFixed(2)}m</td>
         <td class="num">${(d.attributionPct * 100).toFixed(1)}%</td>
       `;
     }
     tbody.appendChild(tr);
   }
-  // Click + keyboard activation: jump to mock-data entity in the graph + inspector
+  const sign = payload.totalMiss > 0 ? "+" : (payload.totalMiss < 0 ? "−" : "");
+  foot.innerHTML = `<td>Total</td><td class="num ${payload.totalMiss < 0 ? "neg" : "pos"}">${sign}$${Math.abs(payload.totalMiss).toFixed(2)}m</td><td class="num">100.0%</td>`;
+
+  // Click + keyboard activation
   const jumpToEntity = (entityId) => {
     if (!entityId) return;
     focusNode(entityId);
     const node = nodes.find((n) => n.id === entityId);
-    if (node) buildInspector({ node, ontology, samplesByEntity, derived });
+    if (node) {
+      // re-build inspector — needs bundle
+      const evt = new CustomEvent("jump-to-entity", { detail: { node } });
+      window.dispatchEvent(evt);
+    }
   };
   tbody.querySelectorAll("tr.clickable").forEach((tr) => {
     tr.addEventListener("click", () => jumpToEntity(tr.dataset.targetEntity));
@@ -4016,11 +4044,55 @@ function updateAttributionTable(attribution) {
       }
     });
   });
-  const sign = attribution.totalMiss > 0 ? "+" : (attribution.totalMiss < 0 ? "−" : "");
-  foot.innerHTML = `<td>Total</td><td class="num ${attribution.totalMiss < 0 ? "neg" : "pos"}">${sign}$${Math.abs(attribution.totalMiss).toFixed(2)}m</td><td class="num">100.0%</td>`;
 }
 
-main();
+function wireVnbLink(bridge) {
+  const link = document.getElementById("d-vnb");
+  const evPanel = document.getElementById("ev-panel");
+  const evKpis = document.querySelector("[data-ev-kpis]");
+  if (!link || !evPanel) return;
+  link.addEventListener("click", (e) => {
+    e.preventDefault();
+    evPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (evKpis) {
+      evKpis.classList.remove("pulse-focus");
+      void evKpis.offsetWidth;
+      evKpis.classList.add("pulse-focus");
+      setTimeout(() => evKpis.classList.remove("pulse-focus"), 1500);
+    }
+    // Pulse the closing-VNB bar in the bridge (last "total"-type bar)
+    const allRects = document.querySelectorAll("#ev-bridge svg rect");
+    if (allRects.length) {
+      const target = allRects[allRects.length - 1];
+      target.classList.remove("pulse-bar");
+      void target.offsetWidth;
+      target.classList.add("pulse-bar");
+      setTimeout(() => target.classList.remove("pulse-bar"), 1500);
+    }
+  });
+}
+
+function updateVnbLink(bridge) {
+  // v3 has no separate "plan" — Plan == Jan VNB.
+  const planEl = document.getElementById("vnb-plan");
+  const actualEl = document.getElementById("vnb-actual");
+  const missEl = document.getElementById("vnb-miss");
+  if (planEl) planEl.textContent = `$${bridge.planVnb.toFixed(2)}m`;
+  if (actualEl) actualEl.textContent = `$${bridge.vnbActual.toFixed(2)}m`;
+  if (missEl) {
+    const v = bridge.vnbVariance;
+    missEl.textContent = `${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(2)}m`;
+    missEl.classList.toggle("neg", v < 0);
+    missEl.classList.toggle("pos", v > 0);
+  }
+}
+
+function showBanner(text) {
+  const b = document.getElementById("banner");
+  if (!b) return;
+  b.textContent = text;
+  b.hidden = false;
+}
   window.__ns__["app.js"] = __exports__;
 })();
 
@@ -4032,4 +4104,3 @@ main();
 </script>
 </body>
 </html><script>
-  
