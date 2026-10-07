@@ -2007,6 +2007,146 @@ function narrate(driver, deltaM, ctx) {
 })();
 
 
+  /* ===== v3_panel.js ===== */
+  (function() {
+  const __exports__ = {};
+// js/v3_panel.js
+//
+// Adapters that take v3 engine output and render the EV bridge, VNB
+// attribution radial, and driver table. Designed to keep the existing
+// renderBridge/renderRadial functions in bridge.js / radial.js working
+// with v3 data — we just adapt the input shape.
+//
+// v2 had a fabricated $-2M "plan miss" story. v3 is honest: the bridge
+// walks Jan→Jun month-by-month VNB movement, and the driver table
+// shows the leave-one-out attribution for the same period.
+
+const engine = window.__ns__["engine_v3.js"] || {};;
+const { renderBridge } = window.__ns__["bridge.js"] || {};;
+const { renderRadial } = window.__ns__["radial.js"] || {};;
+
+const MONTH_LABELS = {
+  "2025-01-01": "Jan",
+  "2025-02-01": "Feb",
+  "2025-03-01": "Mar",
+  "2025-04-01": "Apr",
+  "2025-05-01": "May",
+  "2025-06-01": "Jun",
+  "2025-07-01": "Jul",
+  "2025-08-01": "Aug",
+  "2025-09-01": "Sep",
+  "2025-10-01": "Oct",
+  "2025-11-01": "Nov",
+  "2025-12-01": "Dec",
+};
+
+// Build the per-month VNB walk from the engine's current data.
+function getMonthWalk(currentData) {
+  // Re-init engine on current data, return its monthTotals.
+  const r = engine.initEngine(currentData);
+  return r.months;
+}
+
+// Build a v2-compatible bridge shape:
+//   { opening, closing, planVnb, vnbActual, vnbVariance,
+//     components, waterfall, attribution }
+//
+// For v3 we don't have a "plan" or "VNB baseline" — the bridge walks
+// Jan→Jun monthly, with VNB at start = Jan, VNB at end = Jun.
+function buildV3Bridge({ currentData, baselineData, attribution }) {
+  const months = getMonthWalk(currentData);
+  if (!months.length) {
+    return { opening: 0, closing: 0, planVnb: 0, vnbActual: 0, vnbVariance: 0, components: [], waterfall: [], attribution: null };
+  }
+  const opening = months[0].total_vnb_m;
+  const closing = months[months.length - 1].total_vnb_m;
+  const planVnb = opening;
+  const vnbActual = closing;
+  const vnbVariance = vnbActual - planVnb;
+
+  const components = [];
+  const waterfall = [
+    { key: "opening", label: `Opening VNB (${MONTH_LABELS[months[0].month] || months[0].month})`,
+      value: opening, type: "total", running: opening },
+  ];
+  let running = opening;
+  // Add intermediate months as their Δ contribution.
+  for (let i = 1; i < months.length; i++) {
+    const prev = months[i - 1].total_vnb_m;
+    const curr = months[i].total_vnb_m;
+    const delta = curr - prev;
+    running = curr;
+    const lbl = MONTH_LABELS[months[i].month] || months[i].month;
+    components.push({ key: months[i].month, label: lbl, value: delta, positive: delta >= 0 });
+    waterfall.push({
+      key: months[i].month,
+      label: lbl,
+      value: delta,
+      positive: delta >= 0,
+      running,
+    });
+  }
+  waterfall.push({
+    key: "closing",
+    label: `Closing VNB (${MONTH_LABELS[months[months.length - 1].month] || months[months.length - 1].month})`,
+    value: closing,
+    type: "total",
+    running: closing,
+  });
+
+  // Translate attribution.drivers (which uses .delta_m) to the shape
+  // radial.js + table expect: .impact + .subDrivers + .sourceEntity.
+  // v3 has no sub-drivers — each driver is a leaf.
+  const v3Drivers = (attribution && attribution.drivers) ? attribution.drivers.map((d) => ({
+    key: d.key,
+    label: d.label,
+    impact: d.delta_m,
+    subDrivers: [],
+  })) : [];
+
+  return {
+    opening, closing, planVnb, vnbActual, vnbVariance, components, waterfall,
+    attribution: {
+      drivers: v3Drivers,
+      totalMiss: attribution ? attribution.total_delta_m : 0,
+      sumAbsImpact: v3Drivers.reduce((s, d) => s + Math.abs(d.impact), 0),
+    },
+  };
+}
+
+// Build the driver-table payload from a v3 attribution result.
+function buildV3DriverTable(attribution) {
+  if (!attribution || !attribution.drivers) return { drivers: [], totalMiss: 0 };
+  const sumAbs = attribution.drivers.reduce((s, d) => s + Math.abs(d.delta_m), 0);
+  const drivers = attribution.drivers.map((d) => ({
+    key: d.key,
+    label: d.label,
+    impact: d.delta_m,
+    attributionPct: sumAbs > 0 ? Math.abs(d.delta_m) / sumAbs : 0,
+    sourceEntity: d.key === "active_ratio" ? "agent"
+                : d.key === "productivity" ? "agent"
+                : d.key === "channel_mix" ? "distribution_channel"
+                : d.key === "product_mix" ? "channel_product_mix"
+                : null,
+    description: d.narrative,
+  }));
+  return { drivers, totalMiss: attribution.total_delta_m, sumAbsImpact: sumAbs };
+}
+
+// Convenience: render the EV bridge into the bridge mount element.
+function renderEvBridgePanel(mountEl, bridgeData) {
+  renderBridge(mountEl, bridgeData);
+}
+
+// Convenience: render the VNB attribution radial.
+function renderAttributionRadial(mountEl, bridgeData) {
+  renderRadial(mountEl, bridgeData);
+}
+  window.__ns__["v3_panel.js"] = __exports__;
+  __exports__["buildV3Bridge"] = buildV3Bridge;; __exports__["buildV3DriverTable"] = buildV3DriverTable;; __exports__["renderEvBridgePanel"] = renderEvBridgePanel;; __exports__["renderAttributionRadial"] = renderAttributionRadial;
+})();
+
+
   /* ===== qna_parser.js ===== */
   (function() {
   const __exports__ = {};
@@ -3842,6 +3982,117 @@ function wireLevers({ engine, getBaseline, onChange }) {
 function setPulseFn(fn) { pulseFn = fn; }
   window.__ns__["whatif.js"] = __exports__;
   __exports__["wireLevers"] = wireLevers;; __exports__["setPulseFn"] = setPulseFn;
+})();
+
+
+  /* ===== whatif_v3.js ===== */
+  (function() {
+  const __exports__ = {};
+// js/whatif_v3.js
+//
+// Wires the 3 v3 levers (active_ratio_shift, productivity_shift, mix_shift)
+// to engine_v3.js. The HTML controls have ids lever-active-ratio,
+// lever-productivity, lever-mix-shifts (one input per product_id under
+// CH001 — dynamically built).
+
+let onChangeFn = null;
+
+function setVal(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function fmtPp(p) { return `${p > 0 ? "+" : ""}${p} pp`; }
+function fmtPctDelta(p) { return `${p > 0 ? "+" : ""}${p}%`; }
+
+function buildMixShiftControls(mountEl, products) {
+  // For each product_id in CH001, add a slider ranging -10pp..+10pp.
+  // Keep them in a row, with a header "Shift product mix (per product, ±10pp)".
+  while (mountEl.firstChild) mountEl.removeChild(mountEl.firstChild);
+
+  const header = document.createElement("div");
+  header.className = "lever-row";
+  header.innerHTML = `<label>Shift product mix (per product, ±10pp)</label>`;
+  mountEl.appendChild(header);
+
+  const grid = document.createElement("div");
+  grid.className = "mix-grid";
+  for (const p of products) {
+    const row = document.createElement("div");
+    row.className = "mix-row";
+    row.innerHTML = `
+      <label for="mix-${p.product_id}">${p.product_id}</label>
+      <input id="mix-${p.product_id}" type="range" min="-10" max="10" step="1" value="0" data-product="${p.product_id}" />
+      <span class="value" id="val-mix-${p.product_id}">0 pp</span>
+    `;
+    grid.appendChild(row);
+  }
+  mountEl.appendChild(grid);
+}
+
+function wireV3Levers({ getBaseline, getDataGap, onChange, products }) {
+  onChangeFn = onChange;
+  // Defaults if not passed: pick products from the global namespace
+  // (set by app.js after loadAll), or fall back to a fixed list.
+  const productList = products || (window.__ontology__ && window.__ontology__.products)
+    || [{ product_id: "P001" }, { product_id: "P002" }, { product_id: "P003" }, { product_id: "P004" }];
+
+  const sliderActive = document.getElementById("lever-active-ratio");
+  const sliderProd = document.getElementById("lever-productivity");
+  const mixMount = document.getElementById("mix-shifts-mount");
+  buildMixShiftControls(mixMount, productList);
+  const mixSliders = {};
+  for (const p of productList) {
+    const el = document.getElementById(`mix-${p.product_id}`);
+    if (el) mixSliders[p.product_id] = el;
+  }
+
+  const resetBtn = document.getElementById("reset");
+
+  function read() {
+    const mix_shift = {};
+    for (const [pid, el] of Object.entries(mixSliders)) {
+      const v = parseInt(el.value, 10);
+      if (v !== 0) mix_shift[pid] = v / 100; // v is in pp; engine wants fraction
+    }
+    return {
+      active_ratio_shift: parseFloat(sliderActive.value) / 100,
+      productivity_shift: parseFloat(sliderProd.value) / 100,
+      mix_shift,
+    };
+  }
+
+  let debounceId = null;
+  function refresh(immediate = false) {
+    const fire = () => {
+      const v = read();
+      setVal("val-active-ratio", `${(parseFloat(sliderActive.value)).toFixed(0)}pp`);
+      setVal("val-productivity", `${(parseFloat(sliderProd.value)).toFixed(0)}%`);
+      for (const [pid, el] of Object.entries(mixSliders)) {
+        setVal(`val-mix-${pid}`, fmtPp(parseInt(el.value, 10)));
+      }
+      if (onChangeFn) onChangeFn(v);
+    };
+    if (immediate) { fire(); return; }
+    if (debounceId) clearTimeout(debounceId);
+    debounceId = setTimeout(fire, 80);
+  }
+
+  for (const s of [sliderActive, sliderProd, ...Object.values(mixSliders)]) {
+    s.addEventListener("input", () => refresh(false));
+    s.addEventListener("change", () => refresh(true));
+  }
+  resetBtn.addEventListener("click", () => {
+    sliderActive.value = 0;
+    sliderProd.value = 0;
+    for (const el of Object.values(mixSliders)) el.value = 0;
+    refresh(true);
+  });
+
+  refresh(true);
+}
+  window.__ns__["whatif_v3.js"] = __exports__;
+  __exports__["wireV3Levers"] = wireV3Levers;
 })();
 
 
