@@ -2007,952 +2007,6 @@ function narrate(driver, deltaM, ctx) {
 })();
 
 
-  /* ===== v3_panel.js ===== */
-  (function() {
-  const __exports__ = {};
-// js/v3_panel.js
-//
-// Adapters that take v3 engine output and render the EV bridge, VNB
-// attribution radial, and driver table. Designed to keep the existing
-// renderBridge/renderRadial functions in bridge.js / radial.js working
-// with v3 data — we just adapt the input shape.
-//
-// v2 had a fabricated $-2M "plan miss" story. v3 is honest: the bridge
-// walks Jan→Jun month-by-month VNB movement, and the driver table
-// shows the leave-one-out attribution for the same period.
-
-const engine = window.__ns__["engine_v3.js"] || {};;
-const { renderBridge } = window.__ns__["bridge.js"] || {};;
-const { renderRadial } = window.__ns__["radial.js"] || {};;
-
-const MONTH_LABELS = {
-  "2025-01-01": "Jan",
-  "2025-02-01": "Feb",
-  "2025-03-01": "Mar",
-  "2025-04-01": "Apr",
-  "2025-05-01": "May",
-  "2025-06-01": "Jun",
-  "2025-07-01": "Jul",
-  "2025-08-01": "Aug",
-  "2025-09-01": "Sep",
-  "2025-10-01": "Oct",
-  "2025-11-01": "Nov",
-  "2025-12-01": "Dec",
-};
-
-// Build the per-month VNB walk from the engine's current data.
-function getMonthWalk(currentData) {
-  // Re-init engine on current data, return its monthTotals.
-  const r = engine.initEngine(currentData);
-  return r.months;
-}
-
-// Build a v2-compatible bridge shape:
-//   { opening, closing, planVnb, vnbActual, vnbVariance,
-//     components, waterfall, attribution }
-//
-// For v3 we don't have a "plan" or "VNB baseline" — the bridge walks
-// Jan→Jun monthly, with VNB at start = Jan, VNB at end = Jun.
-function buildV3Bridge({ currentData, baselineData, attribution }) {
-  const months = getMonthWalk(currentData);
-  if (!months.length) {
-    return { opening: 0, closing: 0, planVnb: 0, vnbActual: 0, vnbVariance: 0, components: [], waterfall: [], attribution: null };
-  }
-  const opening = months[0].total_vnb_m;
-  const closing = months[months.length - 1].total_vnb_m;
-  const planVnb = opening;
-  const vnbActual = closing;
-  const vnbVariance = vnbActual - planVnb;
-
-  const components = [];
-  const waterfall = [
-    { key: "opening", label: `Opening VNB (${MONTH_LABELS[months[0].month] || months[0].month})`,
-      value: opening, type: "total", running: opening },
-  ];
-  let running = opening;
-  // Add intermediate months as their Δ contribution.
-  for (let i = 1; i < months.length; i++) {
-    const prev = months[i - 1].total_vnb_m;
-    const curr = months[i].total_vnb_m;
-    const delta = curr - prev;
-    running = curr;
-    const lbl = MONTH_LABELS[months[i].month] || months[i].month;
-    components.push({ key: months[i].month, label: lbl, value: delta, positive: delta >= 0 });
-    waterfall.push({
-      key: months[i].month,
-      label: lbl,
-      value: delta,
-      positive: delta >= 0,
-      running,
-    });
-  }
-  waterfall.push({
-    key: "closing",
-    label: `Closing VNB (${MONTH_LABELS[months[months.length - 1].month] || months[months.length - 1].month})`,
-    value: closing,
-    type: "total",
-    running: closing,
-  });
-
-  // Translate attribution.drivers (which uses .delta_m) to the shape
-  // radial.js + table expect: .impact + .subDrivers + .sourceEntity.
-  // v3 has no sub-drivers — each driver is a leaf.
-  const v3Drivers = (attribution && attribution.drivers) ? attribution.drivers.map((d) => ({
-    key: d.key,
-    label: d.label,
-    impact: d.delta_m,
-    subDrivers: [],
-  })) : [];
-
-  return {
-    opening, closing, planVnb, vnbActual, vnbVariance, components, waterfall,
-    attribution: {
-      drivers: v3Drivers,
-      totalMiss: attribution ? attribution.total_delta_m : 0,
-      sumAbsImpact: v3Drivers.reduce((s, d) => s + Math.abs(d.impact), 0),
-    },
-  };
-}
-
-// Build the driver-table payload from a v3 attribution result.
-function buildV3DriverTable(attribution) {
-  if (!attribution || !attribution.drivers) return { drivers: [], totalMiss: 0 };
-  const sumAbs = attribution.drivers.reduce((s, d) => s + Math.abs(d.delta_m), 0);
-  const drivers = attribution.drivers.map((d) => ({
-    key: d.key,
-    label: d.label,
-    impact: d.delta_m,
-    attributionPct: sumAbs > 0 ? Math.abs(d.delta_m) / sumAbs : 0,
-    sourceEntity: d.key === "active_ratio" ? "agent"
-                : d.key === "productivity" ? "agent"
-                : d.key === "channel_mix" ? "distribution_channel"
-                : d.key === "product_mix" ? "channel_product_mix"
-                : null,
-    description: d.narrative,
-  }));
-  return { drivers, totalMiss: attribution.total_delta_m, sumAbsImpact: sumAbs };
-}
-
-// Convenience: render the EV bridge into the bridge mount element.
-function renderEvBridgePanel(mountEl, bridgeData) {
-  renderBridge(mountEl, bridgeData);
-}
-
-// Convenience: render the VNB attribution radial.
-function renderAttributionRadial(mountEl, bridgeData) {
-  renderRadial(mountEl, bridgeData);
-}
-  window.__ns__["v3_panel.js"] = __exports__;
-  __exports__["buildV3Bridge"] = buildV3Bridge;; __exports__["buildV3DriverTable"] = buildV3DriverTable;; __exports__["renderEvBridgePanel"] = renderEvBridgePanel;; __exports__["renderAttributionRadial"] = renderAttributionRadial;
-})();
-
-
-  /* ===== qna_parser.js ===== */
-  (function() {
-  const __exports__ = {};
-// js/qna_parser.js
-//
-// Free-text question parser for the Q&A layer.
-//
-// Design (per YY 2026-10-07 — option A: free-text only):
-//   - Rule-based interpreter. No LLM in the parse path.
-//   - Emits a structured query object: { type, ...payload }.
-//   - If the input doesn't match a known pattern, returns { type: "unknown" }
-//     with a `fallback_examples` list. The answer renderer shows the
-//     "I don't have a read on that" message + the examples. We never
-//     hallucinate an answer.
-//
-// Patterns supported (see each branch in `parse()`):
-//   trend     — "how has VNB changed from X to Y", "VNB trend over time"
-//   compare   — "compare Jan vs Jun", "compare A vs B"
-//   factors   — "what are the key factors", "what drove the change"
-//   attribute — "how much did X contribute", "P003 contribution"
-//   whatif    — "what if active ratio goes up by 5%"
-//   show      — "show me the trend", "monthly", "by month"
-//
-// Period tokens:
-//   Months: "jan"/"january"/"2025-01"/"2025-01-01" → first month matching
-//   "first" / "earliest" → first available month
-//   "last" / "latest" / "most recent" → last available month
-//
-// Driver tokens (for attribute / whatif):
-//   active ratio / agent activity / churn -> active_ratio_shift
-//   productivity / case size / avg case  -> productivity_shift
-//   mix / product mix / product share   -> mix_shift (also requires a product_id)
-
-const MONTH_ALIASES = {
-  jan: "01", january: "01",
-  feb: "02", february: "02",
-  mar: "03", march: "03",
-  apr: "04", april: "04",
-  may: "05",
-  jun: "06", june: "06",
-  jul: "07", july: "07",
-  aug: "08", august: "08",
-  sep: "09", sept: "09", september: "09",
-  oct: "10", october: "10",
-  nov: "11", november: "11",
-  dec: "12", december: "12",
-};
-
-const PRODUCT_ALIASES = {
-  p001: "P001", term: "P001", "term life": "P001",
-  p002: "P002", participating: "P002", par: "P002", "participating life": "P002",
-  p003: "P003", ul: "P003", "unit-linked": "P003", "unit linked": "P003", "unitlinked": "P003",
-  p004: "P004", universal: "P004", ul_life: "P004", "universal life": "P004",
-};
-
-const CHANNEL_ALIASES = {
-  ch001: "CH001", agency: "CH001",
-  ch002: "CH002", banca: "CH002", bancassurance: "CH002",
-  ch003: "CH003", brokerage: "CH003", broker: "CH003",
-};
-
-// Normalize whitespace + lowercase, keep a position map for span detection.
-function normalize(text) {
-  return text
-    .toLowerCase()
-    .replace(/[\u2013\u2014]/g, "-")
-    .replace(/[?!.,;]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Resolve a month token against the engine's known months.
-// Returns the canonical YYYY-MM-01 string or null.
-function resolveMonthToken(token, knownMonths) {
-  if (!knownMonths || !knownMonths.length) return null;
-  const t = token.trim();
-  if (!t) return null;
-  if (t === "first" || t === "earliest" || t === "start") return knownMonths[0];
-  if (t === "last" || t === "latest" || t === "most recent" || t === "end") {
-    return knownMonths[knownMonths.length - 1];
-  }
-  // Direct YYYY-MM[-DD]
-  const isoMatch = t.match(/^(\d{4})-(\d{1,2})(-(\d{1,2}))?$/);
-  if (isoMatch) {
-    const m = isoMatch[2].padStart(2, "0");
-    const want = `${isoMatch[1]}-${m}-01`;
-    if (knownMonths.includes(want)) return want;
-    // fall through: try as month index
-  }
-  // Month name
-  if (t in MONTH_ALIASES) {
-    const mm = MONTH_ALIASES[t];
-    // Use the year from the first known month (engine data window).
-    const year = knownMonths[0].slice(0, 4);
-    const want = `${year}-${mm}-01`;
-    if (knownMonths.includes(want)) return want;
-    // try next year too (rare)
-    const year2 = String(parseInt(year, 10) + 1);
-    const want2 = `${year2}-${mm}-01`;
-    if (knownMonths.includes(want2)) return want2;
-  }
-  return null;
-}
-
-// Resolve a product token. Returns "P00X" or null.
-function resolveProductToken(token) {
-  const t = token.trim();
-  return PRODUCT_ALIASES[t] || null;
-}
-
-// Resolve a channel token. Returns "CH00X" or null.
-function resolveChannelToken(token) {
-  const t = token.trim();
-  return CHANNEL_ALIASES[t] || null;
-}
-
-// Try to extract a list of month tokens from text. Looks for things like
-// "jan", "january", "2025-01", "2025-01-01", "first"/"last" tokens,
-// and the words "from X to Y" / "X vs Y" / "X to Y".
-function extractMonths(text, knownMonths) {
-  const tokens = text.split(/\s+/);
-  const months = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i].replace(/[.,;:]$/g, "");
-    const m = resolveMonthToken(t, knownMonths);
-    if (m) months.push(m);
-  }
-  // Also try 2-word month names like "jan 2025"
-  for (let i = 0; i < tokens.length - 1; i++) {
-    const t = (tokens[i] + " " + tokens[i + 1]).replace(/[.,;:]$/g, "");
-    const m = resolveMonthToken(t, knownMonths);
-    if (m) months.push(m);
-  }
-  return [...new Set(months)];
-}
-
-// Extract a percentage or fraction shift: "10%", "10 percent", "by 10", "by 0.1".
-function extractPct(text) {
-  const m =
-    text.match(/(\d+(?:\.\d+)?)\s*(?:%|percent|pp|percentage\s*points?)\b/) ||
-    text.match(/by\s+(\d+(?:\.\d+)?)\s*(?:%|percent|pp|percentage\s*points?)?\b/);
-  if (m) return parseFloat(m[1]) / 100;
-  // bare "5pp" or "10%" without context
-  const m2 = text.match(/(\d+(?:\.\d+)?)\s*(?:pp|%)/);
-  if (m2) return parseFloat(m2[1]) / 100;
-  return null;
-}
-
-function extractDirection(text) {
-  if (/\b(go up|increase|grow|rise|higher|more|uplift|up by)\b/.test(text)) return 1;
-  if (/\b(go down|decrease|drop|fall|lower|less|decline|down by|reduce)\b/.test(text)) return -1;
-  return 1;
-}
-
-// Detect a driver phrase and return which lever it maps to.
-function detectDriver(text) {
-  if (/\b(mix|product mix|product share|portfolio|ul share|unit-linked share)\b/.test(text)) {
-    return "mix_shift";
-  }
-  if (/\b(productivity|avg case|case size|per agent|per-agent|productivity_index)\b/.test(text)) {
-    return "productivity_shift";
-  }
-  if (/\b(active ratio|active agents|agent activity|activation|active ratio|engagement|reactivat|churn)\b/.test(text)) {
-    return "active_ratio_shift";
-  }
-  return null;
-}
-
-function detectProductForMix(text) {
-  // Look for a product alias in the text. If multiple, return the first.
-  const tokens = text.split(/[^a-zA-Z0-9]+/);
-  for (const t of tokens) {
-    if (!t) continue;
-    const p = resolveProductToken(t);
-    if (p) return p;
-  }
-  return null;
-}
-
-// Main entry. `knownMonths` is the engine's month list.
-function parse(text, knownMonths) {
-  const raw = (text || "").trim();
-  if (!raw) {
-    return { type: "unknown", original: raw, reason: "empty" };
-  }
-  const t = normalize(raw);
-  const months = extractMonths(t, knownMonths);
-
-  // 1) TREND — "how has VNB changed from X to Y", "vnb trend", "monthly vnb"
-  if (
-    /\b(trend|over time|monthly|by month|month over month|month[- ]over[- ]month|trajectory)\b/.test(t) ||
-    /\b(change|changed|delta|variation)\b.*\b(from|to|vs|versus)\b/.test(t)
-  ) {
-    return {
-      type: "trend",
-      original: raw,
-      metric: detectMetric(t),
-      from: months[0] || knownMonths[0],
-      to: months[1] || knownMonths[knownMonths.length - 1],
-      all_months: months.length ? months : knownMonths,
-    };
-  }
-
-  // 2) COMPARE — "compare X vs Y", "X vs Y", "X versus Y"
-  if (/\b(compare|comparison|versus|vs\.?)\b/.test(t) && months.length >= 2) {
-    return {
-      type: "compare",
-      original: raw,
-      metric: detectMetric(t),
-      periods: months.slice(0, 4),
-    };
-  }
-
-  // 3) FACTORS / ATTRIBUTION — "what are the key factors", "what drove", "what's driving"
-  if (/\b(factors?|drivers?|causes?|attribut|key\s+drivers?|key\s+factors?|reasons?)\b/.test(t) ||
-      /\bwhat\s+(drove|drives|driven|caused|causes)\b/.test(t)) {
-    return {
-      type: "factors",
-      original: raw,
-      metric: detectMetric(t),
-      from: months[0] || knownMonths[0],
-      to: months[1] || knownMonths[knownMonths.length - 1],
-    };
-  }
-
-  // 4) ATTRIBUTE — "how much did X contribute", "X's contribution"
-  const driver = detectDriver(t);
-  // Also recognize "UL mix shift" / "term life impact" / "P001 contribution" as
-  // attribute queries with a product focus.
-  const hasProduct = !!detectProductForMix(t);
-  const isAttributeQ = (driver || hasProduct) && /\b(contribut|attribut|impact|effect|delta|change|how much|share|driv|shift|move|moved)\b/.test(t);
-  if (isAttributeQ) {
-    const pct = extractPct(t);
-    const dir = extractDirection(t);
-    return {
-      type: "attribute",
-      original: raw,
-      metric: detectMetric(t),
-      driver,
-      driver_pct: pct,
-      driver_dir: dir,
-      product_id: driver === "mix_shift" ? detectProductForMix(t) : null,
-      from: months[0] || knownMonths[0],
-      to: months[1] || knownMonths[knownMonths.length - 1],
-    };
-  }
-
-  // 5) WHAT-IF — "what if X goes up by N%"
-  if (/\bwhat\s+if\b/.test(t) || /\b(project|forecast|scenario)\b/.test(t)) {
-    const d = driver || detectDriver(t) || "productivity_shift";
-    const pct = extractPct(t) ?? 0.10;
-    const dir = extractDirection(t);
-    return {
-      type: "whatif",
-      original: raw,
-      driver: d,
-      driver_pct: pct * dir,
-      product_id: d === "mix_shift" ? detectProductForMix(t) : null,
-    };
-  }
-
-  // 6) SHOW / TREND / "monthly"
-  if (/^(show|display|give me|tell me|list)\b/.test(t) && /\b(monthly|trend|by month|over time)\b/.test(t)) {
-    return {
-      type: "trend",
-      original: raw,
-      metric: detectMetric(t),
-      from: knownMonths[0],
-      to: knownMonths[knownMonths.length - 1],
-      all_months: knownMonths,
-    };
-  }
-
-  // Fallback: maybe they asked about a specific period number ("VNB in jan")
-  if (months.length === 1) {
-    return {
-      type: "show_period",
-      original: raw,
-      metric: detectMetric(t),
-      period: months[0],
-    };
-  }
-
-  return {
-    type: "unknown",
-    original: raw,
-    reason: "no_pattern_match",
-  };
-}
-
-function detectMetric(t) {
-  if (/\b(ape|annual premium|premium equivalent)\b/.test(t)) return "ape_m";
-  if (/\b(margin|vnb margin|overall margin|blended margin)\b/.test(t)) return "margin";
-  if (/\b(active|active ratio|active agents|activity)\b/.test(t)) return "active_ratio";
-  if (/\b(productivity|case size|avg case)\b/.test(t)) return "productivity";
-  return "vnb_m"; // default
-}
-
-const FALLBACK_EXAMPLES = [
-  "How has VNB changed from Jan to Jun?",
-  "What are the key factors?",
-  "How much did P003 contribute?",
-  "What if active ratio goes up by 5%?",
-  "Compare Mar vs Jun",
-  "Show me the monthly trend",
-];
-
-  window.__ns__["qna_parser.js"] = __exports__;
-  __exports__["parse"] = parse;; __exports__["FALLBACK_EXAMPLES"] = FALLBACK_EXAMPLES;
-})();
-
-
-  /* ===== qna_panel.js ===== */
-  (function() {
-  const __exports__ = {};
-// js/qna_panel.js
-//
-// Renders Q&A answer cards in the bottom panel.
-//
-// Architecture: every answer is computed by the engine (no LLM). The
-// "narrative" is a template that slots in computed numbers. Every
-// answer also renders the underlying numbers + a "show work" toggle
-// so the user can audit.
-
-const engine = window.__ns__["engine_v3.js"] || {};;
-const { parse, FALLBACK_EXAMPLES } = window.__ns__["qna_parser.js"] || {};;
-const { attribute, DRIVER_ORDER } = window.__ns__["attribution.js"] || {};;
-
-const fmtM = (v) => {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  return `$${v.toFixed(3)}M`;
-};
-const fmtPct = (v) => `${(v * 100).toFixed(1)}%`;
-const fmtPp = (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}pp`;
-
-function el(tag, attrs = {}, children = []) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === "class") e.className = v;
-    else if (k === "html") e.innerHTML = v;
-    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
-    else e.setAttribute(k, v);
-  }
-  for (const c of [].concat(children)) {
-    if (c == null) continue;
-    if (typeof c === "string") e.appendChild(document.createTextNode(c));
-    else e.appendChild(c);
-  }
-  return e;
-}
-
-// --- Answer renderers ---
-
-function renderTrendCard(query, ctx) {
-  const { from, to, all_months, metric } = query;
-  const fromState = ctx.byMonth[from];
-  const toState = ctx.byMonth[to];
-  if (!fromState || !toState) return renderUnknown({ reason: "month_not_found", query });
-
-  const fromVal = fromState[metric] ?? fromState.total_vnb_m;
-  const toVal = toState[metric] ?? toState.total_vnb_m;
-  const delta = toVal - fromVal;
-  const deltaPct = fromVal > 0 ? delta / fromVal : 0;
-
-  // Build the sparkline data.
-  const months = (all_months && all_months.length) ? all_months : Object.keys(ctx.byMonth).sort();
-  const series = months.map((m) => ({ month: m, value: ctx.byMonth[m][metric] ?? ctx.byMonth[m].total_vnb_m }));
-  const spark = renderSparkline(series, metric);
-
-  // Narrative.
-  const metricLabel = metricLabelOf(metric);
-  const direction = delta >= 0 ? "increased" : "decreased";
-  const narrative = `${metricLabel} ${direction} from ${fmtM(fromVal)} (${from}) to ${fmtM(toVal)} (${to}), a ${deltaPct >= 0 ? "+" : ""}${fmtPct(deltaPct)} change.`;
-
-  return el("div", { class: "qna-card" }, [
-    el("div", { class: "qna-card__head" }, [
-      el("span", { class: "qna-card__type" }, "trend"),
-      el("span", { class: "qna-card__query" }, query.original),
-    ]),
-    el("div", { class: "qna-card__narrative" }, narrative),
-    spark,
-    el("table", { class: "qna-card__table" }, [
-      el("thead", {}, el("tr", {}, [el("th", {}, "Metric"), el("th", {}, "From"), el("th", {}, "To"), el("th", {}, "Δ"), el("th", {}, "Δ%")])),
-      el("tbody", {}, el("tr", {}, [
-        el("td", {}, metricLabelOf(metric)),
-        el("td", {}, fmtM(fromVal)),
-        el("td", {}, fmtM(toVal)),
-        el("td", { class: delta >= 0 ? "pos" : "neg" }, fmtM(delta)),
-        el("td", { class: delta >= 0 ? "pos" : "neg" }, fmtPct(deltaPct)),
-      ])),
-    ]),
-    el("details", { class: "qna-card__show-work" }, [
-      el("summary", {}, "show work"),
-      el("div", {}, `Engine call: engine.initEngine(data) → month snapshots`),
-      el("div", {}, `Values: fromState.${metric}=${fromVal.toFixed(6)}, toState.${metric}=${toVal.toFixed(6)}`),
-      el("div", {}, `Δ = to - from = ${delta.toFixed(6)}`),
-    ]),
-  ]);
-}
-
-function renderFactorsCard(query, ctx) {
-  const { from, to } = query;
-  const fromState = ctx.byMonth[from];
-  const toState = ctx.byMonth[to];
-  if (!fromState || !toState) return renderUnknown({ reason: "month_not_found", query });
-  const attr = attribute({ fromState, toState, knownMonths: Object.keys(ctx.byMonth), baselineData: ctx.baselineData });
-
-  // Headline narrative.
-  const totalDelta = attr.total_delta_m;
-  const totalPct = attr.baseline_vnb_m > 0 ? totalDelta / attr.baseline_vnb_m : 0;
-  const headline = `VNB moved from ${fmtM(attr.baseline_vnb_m)} (${from}) to ${fmtM(attr.target_vnb_m)} (${to}) — a ${totalDelta >= 0 ? "+" : ""}${fmtM(totalDelta)} (${fmtPct(totalPct)}) change.`;
-
-  // Factor table.
-  const rows = attr.drivers.map((d) => {
-    return el("tr", {}, [
-      el("td", {}, d.label),
-      el("td", { class: d.delta_m >= 0 ? "pos" : "neg" }, fmtM(d.delta_m)),
-      el("td", {}, fmtPct(attr.baseline_vnb_m > 0 ? d.delta_m / attr.baseline_vnb_m : 0)),
-      el("td", { class: "muted small" }, d.narrative),
-    ]);
-  });
-
-  return el("div", { class: "qna-card" }, [
-    el("div", { class: "qna-card__head" }, [
-      el("span", { class: "qna-card__type" }, "factors"),
-      el("span", { class: "qna-card__query" }, query.original),
-    ]),
-    el("div", { class: "qna-card__narrative" }, headline),
-    el("div", { class: "qna-card__narrative muted small" }, "Sequential decomposition — drivers applied in this order:"),
-    el("ol", { class: "qna-card__driver-order" }, attr.driver_order.map((k) => el("li", {}, k))),
-    el("table", { class: "qna-card__table" }, [
-      el("thead", {}, el("tr", {}, [
-        el("th", {}, "Driver"),
-        el("th", {}, "Δ VNB"),
-        el("th", {}, "Δ %"),
-        el("th", {}, "How"),
-      ])),
-      el("tbody", {}, rows),
-    ]),
-    el("details", { class: "qna-card__show-work" }, [
-      el("summary", {}, "show work"),
-      ...attr.caveats.map((c) => el("div", {}, c)),
-      el("div", {}, `Engine calls: 5 applyLevers({...}) invocations, one per driver, each starting from baseline.`),
-    ]),
-  ]);
-}
-
-function renderAttributeCard(query, ctx) {
-  const { driver, driver_pct, driver_dir, product_id, from, to } = query;
-  const fromState = ctx.byMonth[from];
-  const toState = ctx.byMonth[to];
-  if (!fromState || !toState) return renderUnknown({ reason: "month_not_found", query });
-  const attr = attribute({ fromState, toState, knownMonths: Object.keys(ctx.byMonth), baselineData: ctx.baselineData });
-  const driverLabel = DRIVER_LABEL[driver] || driver;
-  const targetDriver = driver ? attr.drivers.find((d) => d.key === driver) : null;
-  const pct = driver_pct ?? 0.10;
-  const sign = driver_dir ?? 1;
-  let headline;
-  if (targetDriver) {
-    headline = `${driverLabel} ${sign >= 0 ? "uplift" : "drag"} of ${fmtPp(pct * sign)} ${targetDriver.delta_m >= 0 ? "added" : "reduced"} ${fmtM(targetDriver.delta_m)} to VNB between ${from} and ${to}.`;
-  } else if (product_id) {
-    const fp = fromState.products?.[product_id]?.vnb_m || 0;
-    const tp = toState.products?.[product_id]?.vnb_m || 0;
-    headline = `${product_id} VNB moved from ${fmtM(fp)} to ${fmtM(tp)} between ${from} and ${to}. Full attribution below.`;
-  } else {
-    headline = `Full attribution of VNB change between ${from} and ${to}:`;
-  }
-
-  // If a product_id was named, also report the product's vnb contribution
-  // directly.
-  let productRow = null;
-  if (product_id) {
-    const fp = fromState.products?.[product_id]?.vnb_m || 0;
-    const tp = toState.products?.[product_id]?.vnb_m || 0;
-    productRow = el("tr", {}, [
-      el("td", {}, `${product_id} VNB`),
-      el("td", { class: (tp - fp) >= 0 ? "pos" : "neg" }, fmtM(tp - fp)),
-      el("td", {}, fmtPct(fp > 0 ? (tp - fp) / fp : 0)),
-      el("td", { class: "muted small" }, `${fmtM(fp)} → ${fmtM(tp)}`),
-    ]);
-  }
-
-  return el("div", { class: "qna-card" }, [
-    el("div", { class: "qna-card__head" }, [
-      el("span", { class: "qna-card__type" }, "attribute"),
-      el("span", { class: "qna-card__query" }, query.original),
-    ]),
-    el("div", { class: "qna-card__narrative" }, headline),
-    el("table", { class: "qna-card__table" }, [
-      el("thead", {}, el("tr", {}, [
-        el("th", {}, "Driver"),
-        el("th", {}, "Δ VNB"),
-        el("th", {}, "Δ %"),
-        el("th", {}, "How"),
-      ])),
-      el("tbody", {}, [
-        ...attr.drivers.map((d) => el("tr", {}, [
-          el("td", {}, d.label),
-          el("td", { class: d.delta_m >= 0 ? "pos" : "neg" }, fmtM(d.delta_m)),
-          el("td", {}, fmtPct(attr.baseline_vnb_m > 0 ? d.delta_m / attr.baseline_vnb_m : 0)),
-          el("td", { class: "muted small" }, d.narrative),
-        ])),
-        productRow,
-      ].filter(Boolean)),
-    ]),
-    el("details", { class: "qna-card__show-work" }, [
-      el("summary", {}, "show work"),
-      el("div", {}, `Engine: attribute() runs 5 applyLevers calls (one per driver) on the engine baseline.`),
-      el("div", {}, `Driver order: ${attr.driver_order.join(" → ")}`),
-      ...attr.caveats.map((c) => el("div", {}, c)),
-    ]),
-  ]);
-}
-
-function renderWhatIfCard(query, ctx) {
-  const { driver, driver_pct, product_id } = query;
-  const levers = { active_ratio_shift: 0, productivity_shift: 0, mix_shift: {} };
-  if (driver === "active_ratio_shift") levers.active_ratio_shift = driver_pct;
-  else if (driver === "productivity_shift") levers.productivity_shift = driver_pct;
-  else if (driver === "mix_shift") {
-    // If a product is named, add the share; otherwise distribute across
-    // all products proportionally.
-    if (product_id) {
-      levers.mix_shift[product_id] = Math.abs(driver_pct);
-    } else {
-      // Rebalance from a default — split from P002 (largest share).
-      levers.mix_shift.P002 = -Math.abs(driver_pct);
-      // Spread the gain across the other 3.
-      const others = ["P001", "P003", "P004"];
-      others.forEach((p) => (levers.mix_shift[p] = Math.abs(driver_pct) / others.length));
-    }
-  }
-  const r = engine.applyLevers(levers);
-  const baselineVnb = ctx.totals.vnb_m;
-  const projectedVnb = r.totals.vnb_m;
-  const delta = projectedVnb - baselineVnb;
-  const driverLabel = DRIVER_LABEL[driver] || driver;
-
-  const narrative = `${driverLabel} ${driver_pct >= 0 ? "uplift" : "drag"} of ${fmtPp(driver_pct)} → VNB projected at ${fmtM(projectedVnb)} (${delta >= 0 ? "+" : ""}${fmtM(delta)} vs baseline ${fmtM(baselineVnb)}).`;
-
-  return el("div", { class: "qna-card" }, [
-    el("div", { class: "qna-card__head" }, [
-      el("span", { class: "qna-card__type" }, "what-if"),
-      el("span", { class: "qna-card__query" }, query.original),
-    ]),
-    el("div", { class: "qna-card__narrative" }, narrative),
-    el("table", { class: "qna-card__table" }, [
-      el("thead", {}, el("tr", {}, [el("th", {}, "Metric"), el("th", {}, "Baseline"), el("th", {}, "Projected"), el("th", {}, "Δ")])),
-      el("tbody", {}, [
-        el("tr", {}, [
-          el("td", {}, "Total APE ($M)"),
-          el("td", {}, fmtM(ctx.totals.ape_m)),
-          el("td", {}, fmtM(r.totals.ape_m)),
-          el("td", { class: (r.totals.ape_m - ctx.totals.ape_m) >= 0 ? "pos" : "neg" }, fmtM(r.totals.ape_m - ctx.totals.ape_m)),
-        ]),
-        el("tr", {}, [
-          el("td", {}, "Total VNB ($M)"),
-          el("td", {}, fmtM(baselineVnb)),
-          el("td", {}, fmtM(projectedVnb)),
-          el("td", { class: delta >= 0 ? "pos" : "neg" }, fmtM(delta)),
-        ]),
-        el("tr", {}, [
-          el("td", {}, "Blended Margin"),
-          el("td", {}, fmtPct(ctx.totals.margin)),
-          el("td", {}, fmtPct(r.totals.margin)),
-          el("td", { class: "muted small" }, fmtPp(r.totals.margin - ctx.totals.margin)),
-        ]),
-      ]),
-    ]),
-    el("details", { class: "qna-card__show-work" }, [
-      el("summary", {}, "show work"),
-      el("div", {}, `Engine: applyLevers(${JSON.stringify(levers)})`),
-      el("div", {}, `Returned: ${JSON.stringify(r.totals)}`),
-    ]),
-  ]);
-}
-
-function renderCompareCard(query, ctx) {
-  const { periods, metric } = query;
-  if (!periods || periods.length < 2) return renderUnknown({ reason: "missing_periods", query });
-  const rows = periods.map((p) => {
-    const s = ctx.byMonth[p];
-    if (!s) return el("tr", {}, [el("td", {}, p), el("td", { colspan: 3 }, "(not in engine data)")]);
-    const v = s[metric] ?? s.total_vnb_m;
-    return el("tr", {}, [
-      el("td", {}, p),
-      el("td", {}, fmtM(s.total_ape_m)),
-      el("td", {}, fmtM(s.total_vnb_m)),
-      el("td", {}, fmtPct(s.margin)),
-    ]);
-  });
-  return el("div", { class: "qna-card" }, [
-    el("div", { class: "qna-card__head" }, [
-      el("span", { class: "qna-card__type" }, "compare"),
-      el("span", { class: "qna-card__query" }, query.original),
-    ]),
-    el("div", { class: "qna-card__narrative" }, `Comparing ${periods.length} periods on ${metricLabelOf(metric)}.`),
-    el("table", { class: "qna-card__table" }, [
-      el("thead", {}, el("tr", {}, [
-        el("th", {}, "Period"),
-        el("th", {}, "APE"),
-        el("th", {}, "VNB"),
-        el("th", {}, "Margin"),
-      ])),
-      el("tbody", {}, rows),
-    ]),
-  ]);
-}
-
-function renderShowPeriodCard(query, ctx) {
-  const s = ctx.byMonth[query.period];
-  if (!s) return renderUnknown({ reason: "month_not_found", query });
-  return el("div", { class: "qna-card" }, [
-    el("div", { class: "qna-card__head" }, [
-      el("span", { class: "qna-card__type" }, "show-period"),
-      el("span", { class: "qna-card__query" }, query.original),
-    ]),
-    el("div", { class: "qna-card__narrative" }, `${query.period}: APE ${fmtM(s.total_ape_m)}, VNB ${fmtM(s.total_vnb_m)}, margin ${fmtPct(s.margin)}.`),
-    el("table", { class: "qna-card__table" }, [
-      el("thead", {}, el("tr", {}, [el("th", {}, "Channel"), el("th", {}, "APE"), el("th", {}, "VNB"), el("th", {}, "Active")])),
-      el("tbody", {}, Object.entries(s.channels).map(([chId, c]) =>
-        el("tr", {}, [
-          el("td", {}, chId),
-          el("td", {}, fmtM(c.ape_m)),
-          el("td", {}, fmtM(c.vnb_m)),
-          el("td", {}, `${c.active}`),
-        ])
-      )),
-    ]),
-  ]);
-}
-
-function renderUnknown({ reason, query }) {
-  return el("div", { class: "qna-card qna-card--unknown" }, [
-    el("div", { class: "qna-card__head" }, [
-      el("span", { class: "qna-card__type" }, "no-read"),
-    ]),
-    el("div", { class: "qna-card__narrative" }, `I can't read that — engine returned no pattern match (${reason || "no_pattern_match"}). Try one of these:`),
-    el("ul", { class: "qna-card__examples" }, FALLBACK_EXAMPLES.map((ex) =>
-      el("li", {}, el("button", { class: "qna-card__example-btn", "data-example": ex }, ex))
-    )),
-  ]);
-}
-
-const DRIVER_LABEL = {
-  active_ratio_shift: "Active Ratio",
-  productivity_shift: "Productivity per Active Agent",
-  mix_shift: "Product Mix",
-};
-
-function metricLabelOf(metric) {
-  switch (metric) {
-    case "vnb_m": return "VNB";
-    case "ape_m": return "APE";
-    case "margin": return "VNB Margin";
-    case "active_ratio": return "Active Ratio";
-    case "productivity": return "Productivity";
-    default: return metric;
-  }
-}
-
-function renderSparkline(series, metric) {
-  if (!series.length) return el("div", {}, "(no data)");
-  const W = 480, H = 90, P = 6;
-  const vals = series.map((s) => s.value);
-  const minV = Math.min(...vals), maxV = Math.max(...vals);
-  const span = (maxV - minV) || 1;
-  const xStep = (W - 2 * P) / Math.max(1, series.length - 1);
-  const points = series.map((s, i) => {
-    const x = P + i * xStep;
-    const y = H - P - ((s.value - minV) / span) * (H - 2 * P);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  const svg = `
-    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="1.5" />
-      ${series.map((s, i) => {
-        const x = P + i * xStep;
-        const y = H - P - ((s.value - minV) / span) * (H - 2 * P);
-        return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="currentColor" />`;
-      }).join("")}
-    </svg>`;
-  const wrap = el("div", { class: "qna-card__sparkline" });
-  wrap.innerHTML = svg;
-  // Add the x-axis labels as text.
-  const label = el("div", { class: "qna-card__sparkline-labels muted small" },
-    `${series[0].month} → ${series[series.length - 1].month} · min ${fmtM(minV)} · max ${fmtM(maxV)}`);
-  return el("div", {}, [wrap, label]);
-}
-
-// --- Public entry point ---
-
-function mountQnaPanel({ container, baselineData, months, totals }) {
-  // Build the index by month for the answer renderers.
-  const byMonth = {};
-  for (const m of months) byMonth[m.month] = m;
-  const ctx = { baselineData, months, totals, byMonth };
-
-  const form = el("form", { class: "qna-form" });
-  const input = el("input", {
-    type: "text", placeholder: "Ask in plain English… (e.g. 'How has VNB changed from Jan to Jun?')",
-    class: "qna-form__input", id: "qna-input", autocomplete: "off",
-  });
-  const submit = el("button", { type: "submit", class: "qna-form__submit" }, "Ask");
-  form.appendChild(input);
-  form.appendChild(submit);
-
-  const output = el("div", { class: "qna-output", id: "qna-output" });
-
-  container.appendChild(el("div", { class: "qna-panel__head" }, [
-    el("h2", {}, "Ask the engine"),
-    el("p", { class: "muted small" }, "Every answer is computed from the data — no LLM in the path. The 'show work' toggle shows the engine calls."),
-  ]));
-  container.appendChild(form);
-  container.appendChild(output);
-
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    submitAnswer();
-  });
-
-  // Click-to-fill example chips.
-  container.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-example]");
-    if (!btn) return;
-    input.value = btn.getAttribute("data-example");
-    submitAnswer();
-  });
-
-  function submitAnswer() {
-    const text = input.value.trim();
-    if (!text) return;
-    const knownMonths = Object.keys(byMonth).sort();
-    const query = parse(text, knownMonths);
-    let card;
-    switch (query.type) {
-      case "trend": card = renderTrendCard(query, ctx); break;
-      case "factors": card = renderFactorsCard(query, ctx); break;
-      case "attribute": card = renderAttributeCard(query, ctx); break;
-      case "whatif": card = renderWhatIfCard(query, ctx); break;
-      case "compare": card = renderCompareCard(query, ctx); break;
-      case "show_period": card = renderShowPeriodCard(query, ctx); break;
-      default: card = renderUnknown({ reason: query.reason, query });
-    }
-    // Clear output and render.
-    output.innerHTML = "";
-    output.appendChild(card);
-  }
-
-  // Show a hint with the first example on mount.
-  output.appendChild(el("div", { class: "qna-hint" }, [
-    el("div", { class: "muted small" }, "Try one of these to start:"),
-    el("ul", { class: "qna-card__examples" }, FALLBACK_EXAMPLES.map((ex) =>
-      el("li", {}, el("button", { class: "qna-card__example-btn", "data-example": ex }, ex))
-    )),
-  ]));
-}
-
-  window.__ns__["qna_panel.js"] = __exports__;
-  __exports__["mountQnaPanel"] = mountQnaPanel;
-})();
-
-
-  /* ===== qna_boot.js ===== */
-  (function() {
-  const __exports__ = {};
-// js/qna_boot.js
-//
-// Boot the Q&A panel independently of the main v2 page. Loads v3 data,
-// runs the v3 engine, mounts the panel into a target DOM element.
-
-const engine = window.__ns__["engine_v3.js"] || {};;
-const { mountQnaPanel } = window.__ns__["qna_panel.js"] || {};;
-
-async function bootQnaPanel({ containerId }) {
-  const container = document.getElementById(containerId);
-  if (!container) {
-    console.warn(`[qna-boot] container #${containerId} not found`);
-    return;
-  }
-  let data;
-  try {
-    const resp = await fetch("data/bp-tables-test-v3.json");
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    data = await resp.json();
-  } catch (e) {
-    container.innerHTML = `<div class="qna-card qna-card--unknown">
-      <div class="qna-card__head"><span class="qna-card__type">error</span></div>
-      <div class="qna-card__narrative">Failed to load v3 data: ${e.message}</div>
-    </div>`;
-    return;
-  }
-  const init = engine.initEngine(data);
-  mountQnaPanel({
-    container,
-    baselineData: data,
-    months: init.months,
-    totals: init.totals,
-  });
-}
-
-  window.__ns__["qna_boot.js"] = __exports__;
-  __exports__["bootQnaPanel"] = bootQnaPanel;
-})();
-
-
   /* ===== engine.js ===== */
   (function() {
   const __exports__ = {};
@@ -3982,6 +3036,952 @@ function wireLevers({ engine, getBaseline, onChange }) {
 function setPulseFn(fn) { pulseFn = fn; }
   window.__ns__["whatif.js"] = __exports__;
   __exports__["wireLevers"] = wireLevers;; __exports__["setPulseFn"] = setPulseFn;
+})();
+
+
+  /* ===== v3_panel.js ===== */
+  (function() {
+  const __exports__ = {};
+// js/v3_panel.js
+//
+// Adapters that take v3 engine output and render the EV bridge, VNB
+// attribution radial, and driver table. Designed to keep the existing
+// renderBridge/renderRadial functions in bridge.js / radial.js working
+// with v3 data — we just adapt the input shape.
+//
+// v2 had a fabricated $-2M "plan miss" story. v3 is honest: the bridge
+// walks Jan→Jun month-by-month VNB movement, and the driver table
+// shows the leave-one-out attribution for the same period.
+
+const engine = window.__ns__["engine_v3.js"] || {};;
+const { renderBridge } = window.__ns__["bridge.js"] || {};;
+const { renderRadial } = window.__ns__["radial.js"] || {};;
+
+const MONTH_LABELS = {
+  "2025-01-01": "Jan",
+  "2025-02-01": "Feb",
+  "2025-03-01": "Mar",
+  "2025-04-01": "Apr",
+  "2025-05-01": "May",
+  "2025-06-01": "Jun",
+  "2025-07-01": "Jul",
+  "2025-08-01": "Aug",
+  "2025-09-01": "Sep",
+  "2025-10-01": "Oct",
+  "2025-11-01": "Nov",
+  "2025-12-01": "Dec",
+};
+
+// Build the per-month VNB walk from the engine's current data.
+function getMonthWalk(currentData) {
+  // Re-init engine on current data, return its monthTotals.
+  const r = engine.initEngine(currentData);
+  return r.months;
+}
+
+// Build a v2-compatible bridge shape:
+//   { opening, closing, planVnb, vnbActual, vnbVariance,
+//     components, waterfall, attribution }
+//
+// For v3 we don't have a "plan" or "VNB baseline" — the bridge walks
+// Jan→Jun monthly, with VNB at start = Jan, VNB at end = Jun.
+function buildV3Bridge({ currentData, baselineData, attribution }) {
+  const months = getMonthWalk(currentData);
+  if (!months.length) {
+    return { opening: 0, closing: 0, planVnb: 0, vnbActual: 0, vnbVariance: 0, components: [], waterfall: [], attribution: null };
+  }
+  const opening = months[0].total_vnb_m;
+  const closing = months[months.length - 1].total_vnb_m;
+  const planVnb = opening;
+  const vnbActual = closing;
+  const vnbVariance = vnbActual - planVnb;
+
+  const components = [];
+  const waterfall = [
+    { key: "opening", label: `Opening VNB (${MONTH_LABELS[months[0].month] || months[0].month})`,
+      value: opening, type: "total", running: opening },
+  ];
+  let running = opening;
+  // Add intermediate months as their Δ contribution.
+  for (let i = 1; i < months.length; i++) {
+    const prev = months[i - 1].total_vnb_m;
+    const curr = months[i].total_vnb_m;
+    const delta = curr - prev;
+    running = curr;
+    const lbl = MONTH_LABELS[months[i].month] || months[i].month;
+    components.push({ key: months[i].month, label: lbl, value: delta, positive: delta >= 0 });
+    waterfall.push({
+      key: months[i].month,
+      label: lbl,
+      value: delta,
+      positive: delta >= 0,
+      running,
+    });
+  }
+  waterfall.push({
+    key: "closing",
+    label: `Closing VNB (${MONTH_LABELS[months[months.length - 1].month] || months[months.length - 1].month})`,
+    value: closing,
+    type: "total",
+    running: closing,
+  });
+
+  // Translate attribution.drivers (which uses .delta_m) to the shape
+  // radial.js + table expect: .impact + .subDrivers + .sourceEntity.
+  // v3 has no sub-drivers — each driver is a leaf.
+  const v3Drivers = (attribution && attribution.drivers) ? attribution.drivers.map((d) => ({
+    key: d.key,
+    label: d.label,
+    impact: d.delta_m,
+    subDrivers: [],
+  })) : [];
+
+  return {
+    opening, closing, planVnb, vnbActual, vnbVariance, components, waterfall,
+    attribution: {
+      drivers: v3Drivers,
+      totalMiss: attribution ? attribution.total_delta_m : 0,
+      sumAbsImpact: v3Drivers.reduce((s, d) => s + Math.abs(d.impact), 0),
+    },
+  };
+}
+
+// Build the driver-table payload from a v3 attribution result.
+function buildV3DriverTable(attribution) {
+  if (!attribution || !attribution.drivers) return { drivers: [], totalMiss: 0 };
+  const sumAbs = attribution.drivers.reduce((s, d) => s + Math.abs(d.delta_m), 0);
+  const drivers = attribution.drivers.map((d) => ({
+    key: d.key,
+    label: d.label,
+    impact: d.delta_m,
+    attributionPct: sumAbs > 0 ? Math.abs(d.delta_m) / sumAbs : 0,
+    sourceEntity: d.key === "active_ratio" ? "agent"
+                : d.key === "productivity" ? "agent"
+                : d.key === "channel_mix" ? "distribution_channel"
+                : d.key === "product_mix" ? "channel_product_mix"
+                : null,
+    description: d.narrative,
+  }));
+  return { drivers, totalMiss: attribution.total_delta_m, sumAbsImpact: sumAbs };
+}
+
+// Convenience: render the EV bridge into the bridge mount element.
+function renderEvBridgePanel(mountEl, bridgeData) {
+  renderBridge(mountEl, bridgeData);
+}
+
+// Convenience: render the VNB attribution radial.
+function renderAttributionRadial(mountEl, bridgeData) {
+  renderRadial(mountEl, bridgeData);
+}
+  window.__ns__["v3_panel.js"] = __exports__;
+  __exports__["buildV3Bridge"] = buildV3Bridge;; __exports__["buildV3DriverTable"] = buildV3DriverTable;; __exports__["renderEvBridgePanel"] = renderEvBridgePanel;; __exports__["renderAttributionRadial"] = renderAttributionRadial;
+})();
+
+
+  /* ===== qna_parser.js ===== */
+  (function() {
+  const __exports__ = {};
+// js/qna_parser.js
+//
+// Free-text question parser for the Q&A layer.
+//
+// Design (per YY 2026-10-07 — option A: free-text only):
+//   - Rule-based interpreter. No LLM in the parse path.
+//   - Emits a structured query object: { type, ...payload }.
+//   - If the input doesn't match a known pattern, returns { type: "unknown" }
+//     with a `fallback_examples` list. The answer renderer shows the
+//     "I don't have a read on that" message + the examples. We never
+//     hallucinate an answer.
+//
+// Patterns supported (see each branch in `parse()`):
+//   trend     — "how has VNB changed from X to Y", "VNB trend over time"
+//   compare   — "compare Jan vs Jun", "compare A vs B"
+//   factors   — "what are the key factors", "what drove the change"
+//   attribute — "how much did X contribute", "P003 contribution"
+//   whatif    — "what if active ratio goes up by 5%"
+//   show      — "show me the trend", "monthly", "by month"
+//
+// Period tokens:
+//   Months: "jan"/"january"/"2025-01"/"2025-01-01" → first month matching
+//   "first" / "earliest" → first available month
+//   "last" / "latest" / "most recent" → last available month
+//
+// Driver tokens (for attribute / whatif):
+//   active ratio / agent activity / churn -> active_ratio_shift
+//   productivity / case size / avg case  -> productivity_shift
+//   mix / product mix / product share   -> mix_shift (also requires a product_id)
+
+const MONTH_ALIASES = {
+  jan: "01", january: "01",
+  feb: "02", february: "02",
+  mar: "03", march: "03",
+  apr: "04", april: "04",
+  may: "05",
+  jun: "06", june: "06",
+  jul: "07", july: "07",
+  aug: "08", august: "08",
+  sep: "09", sept: "09", september: "09",
+  oct: "10", october: "10",
+  nov: "11", november: "11",
+  dec: "12", december: "12",
+};
+
+const PRODUCT_ALIASES = {
+  p001: "P001", term: "P001", "term life": "P001",
+  p002: "P002", participating: "P002", par: "P002", "participating life": "P002",
+  p003: "P003", ul: "P003", "unit-linked": "P003", "unit linked": "P003", "unitlinked": "P003",
+  p004: "P004", universal: "P004", ul_life: "P004", "universal life": "P004",
+};
+
+const CHANNEL_ALIASES = {
+  ch001: "CH001", agency: "CH001",
+  ch002: "CH002", banca: "CH002", bancassurance: "CH002",
+  ch003: "CH003", brokerage: "CH003", broker: "CH003",
+};
+
+// Normalize whitespace + lowercase, keep a position map for span detection.
+function normalize(text) {
+  return text
+    .toLowerCase()
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[?!.,;]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Resolve a month token against the engine's known months.
+// Returns the canonical YYYY-MM-01 string or null.
+function resolveMonthToken(token, knownMonths) {
+  if (!knownMonths || !knownMonths.length) return null;
+  const t = token.trim();
+  if (!t) return null;
+  if (t === "first" || t === "earliest" || t === "start") return knownMonths[0];
+  if (t === "last" || t === "latest" || t === "most recent" || t === "end") {
+    return knownMonths[knownMonths.length - 1];
+  }
+  // Direct YYYY-MM[-DD]
+  const isoMatch = t.match(/^(\d{4})-(\d{1,2})(-(\d{1,2}))?$/);
+  if (isoMatch) {
+    const m = isoMatch[2].padStart(2, "0");
+    const want = `${isoMatch[1]}-${m}-01`;
+    if (knownMonths.includes(want)) return want;
+    // fall through: try as month index
+  }
+  // Month name
+  if (t in MONTH_ALIASES) {
+    const mm = MONTH_ALIASES[t];
+    // Use the year from the first known month (engine data window).
+    const year = knownMonths[0].slice(0, 4);
+    const want = `${year}-${mm}-01`;
+    if (knownMonths.includes(want)) return want;
+    // try next year too (rare)
+    const year2 = String(parseInt(year, 10) + 1);
+    const want2 = `${year2}-${mm}-01`;
+    if (knownMonths.includes(want2)) return want2;
+  }
+  return null;
+}
+
+// Resolve a product token. Returns "P00X" or null.
+function resolveProductToken(token) {
+  const t = token.trim();
+  return PRODUCT_ALIASES[t] || null;
+}
+
+// Resolve a channel token. Returns "CH00X" or null.
+function resolveChannelToken(token) {
+  const t = token.trim();
+  return CHANNEL_ALIASES[t] || null;
+}
+
+// Try to extract a list of month tokens from text. Looks for things like
+// "jan", "january", "2025-01", "2025-01-01", "first"/"last" tokens,
+// and the words "from X to Y" / "X vs Y" / "X to Y".
+function extractMonths(text, knownMonths) {
+  const tokens = text.split(/\s+/);
+  const months = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i].replace(/[.,;:]$/g, "");
+    const m = resolveMonthToken(t, knownMonths);
+    if (m) months.push(m);
+  }
+  // Also try 2-word month names like "jan 2025"
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const t = (tokens[i] + " " + tokens[i + 1]).replace(/[.,;:]$/g, "");
+    const m = resolveMonthToken(t, knownMonths);
+    if (m) months.push(m);
+  }
+  return [...new Set(months)];
+}
+
+// Extract a percentage or fraction shift: "10%", "10 percent", "by 10", "by 0.1".
+function extractPct(text) {
+  const m =
+    text.match(/(\d+(?:\.\d+)?)\s*(?:%|percent|pp|percentage\s*points?)\b/) ||
+    text.match(/by\s+(\d+(?:\.\d+)?)\s*(?:%|percent|pp|percentage\s*points?)?\b/);
+  if (m) return parseFloat(m[1]) / 100;
+  // bare "5pp" or "10%" without context
+  const m2 = text.match(/(\d+(?:\.\d+)?)\s*(?:pp|%)/);
+  if (m2) return parseFloat(m2[1]) / 100;
+  return null;
+}
+
+function extractDirection(text) {
+  if (/\b(go up|increase|grow|rise|higher|more|uplift|up by)\b/.test(text)) return 1;
+  if (/\b(go down|decrease|drop|fall|lower|less|decline|down by|reduce)\b/.test(text)) return -1;
+  return 1;
+}
+
+// Detect a driver phrase and return which lever it maps to.
+function detectDriver(text) {
+  if (/\b(mix|product mix|product share|portfolio|ul share|unit-linked share)\b/.test(text)) {
+    return "mix_shift";
+  }
+  if (/\b(productivity|avg case|case size|per agent|per-agent|productivity_index)\b/.test(text)) {
+    return "productivity_shift";
+  }
+  if (/\b(active ratio|active agents|agent activity|activation|active ratio|engagement|reactivat|churn)\b/.test(text)) {
+    return "active_ratio_shift";
+  }
+  return null;
+}
+
+function detectProductForMix(text) {
+  // Look for a product alias in the text. If multiple, return the first.
+  const tokens = text.split(/[^a-zA-Z0-9]+/);
+  for (const t of tokens) {
+    if (!t) continue;
+    const p = resolveProductToken(t);
+    if (p) return p;
+  }
+  return null;
+}
+
+// Main entry. `knownMonths` is the engine's month list.
+function parse(text, knownMonths) {
+  const raw = (text || "").trim();
+  if (!raw) {
+    return { type: "unknown", original: raw, reason: "empty" };
+  }
+  const t = normalize(raw);
+  const months = extractMonths(t, knownMonths);
+
+  // 1) TREND — "how has VNB changed from X to Y", "vnb trend", "monthly vnb"
+  if (
+    /\b(trend|over time|monthly|by month|month over month|month[- ]over[- ]month|trajectory)\b/.test(t) ||
+    /\b(change|changed|delta|variation)\b.*\b(from|to|vs|versus)\b/.test(t)
+  ) {
+    return {
+      type: "trend",
+      original: raw,
+      metric: detectMetric(t),
+      from: months[0] || knownMonths[0],
+      to: months[1] || knownMonths[knownMonths.length - 1],
+      all_months: months.length ? months : knownMonths,
+    };
+  }
+
+  // 2) COMPARE — "compare X vs Y", "X vs Y", "X versus Y"
+  if (/\b(compare|comparison|versus|vs\.?)\b/.test(t) && months.length >= 2) {
+    return {
+      type: "compare",
+      original: raw,
+      metric: detectMetric(t),
+      periods: months.slice(0, 4),
+    };
+  }
+
+  // 3) FACTORS / ATTRIBUTION — "what are the key factors", "what drove", "what's driving"
+  if (/\b(factors?|drivers?|causes?|attribut|key\s+drivers?|key\s+factors?|reasons?)\b/.test(t) ||
+      /\bwhat\s+(drove|drives|driven|caused|causes)\b/.test(t)) {
+    return {
+      type: "factors",
+      original: raw,
+      metric: detectMetric(t),
+      from: months[0] || knownMonths[0],
+      to: months[1] || knownMonths[knownMonths.length - 1],
+    };
+  }
+
+  // 4) ATTRIBUTE — "how much did X contribute", "X's contribution"
+  const driver = detectDriver(t);
+  // Also recognize "UL mix shift" / "term life impact" / "P001 contribution" as
+  // attribute queries with a product focus.
+  const hasProduct = !!detectProductForMix(t);
+  const isAttributeQ = (driver || hasProduct) && /\b(contribut|attribut|impact|effect|delta|change|how much|share|driv|shift|move|moved)\b/.test(t);
+  if (isAttributeQ) {
+    const pct = extractPct(t);
+    const dir = extractDirection(t);
+    return {
+      type: "attribute",
+      original: raw,
+      metric: detectMetric(t),
+      driver,
+      driver_pct: pct,
+      driver_dir: dir,
+      product_id: driver === "mix_shift" ? detectProductForMix(t) : null,
+      from: months[0] || knownMonths[0],
+      to: months[1] || knownMonths[knownMonths.length - 1],
+    };
+  }
+
+  // 5) WHAT-IF — "what if X goes up by N%"
+  if (/\bwhat\s+if\b/.test(t) || /\b(project|forecast|scenario)\b/.test(t)) {
+    const d = driver || detectDriver(t) || "productivity_shift";
+    const pct = extractPct(t) ?? 0.10;
+    const dir = extractDirection(t);
+    return {
+      type: "whatif",
+      original: raw,
+      driver: d,
+      driver_pct: pct * dir,
+      product_id: d === "mix_shift" ? detectProductForMix(t) : null,
+    };
+  }
+
+  // 6) SHOW / TREND / "monthly"
+  if (/^(show|display|give me|tell me|list)\b/.test(t) && /\b(monthly|trend|by month|over time)\b/.test(t)) {
+    return {
+      type: "trend",
+      original: raw,
+      metric: detectMetric(t),
+      from: knownMonths[0],
+      to: knownMonths[knownMonths.length - 1],
+      all_months: knownMonths,
+    };
+  }
+
+  // Fallback: maybe they asked about a specific period number ("VNB in jan")
+  if (months.length === 1) {
+    return {
+      type: "show_period",
+      original: raw,
+      metric: detectMetric(t),
+      period: months[0],
+    };
+  }
+
+  return {
+    type: "unknown",
+    original: raw,
+    reason: "no_pattern_match",
+  };
+}
+
+function detectMetric(t) {
+  if (/\b(ape|annual premium|premium equivalent)\b/.test(t)) return "ape_m";
+  if (/\b(margin|vnb margin|overall margin|blended margin)\b/.test(t)) return "margin";
+  if (/\b(active|active ratio|active agents|activity)\b/.test(t)) return "active_ratio";
+  if (/\b(productivity|case size|avg case)\b/.test(t)) return "productivity";
+  return "vnb_m"; // default
+}
+
+const FALLBACK_EXAMPLES = [
+  "How has VNB changed from Jan to Jun?",
+  "What are the key factors?",
+  "How much did P003 contribute?",
+  "What if active ratio goes up by 5%?",
+  "Compare Mar vs Jun",
+  "Show me the monthly trend",
+];
+
+  window.__ns__["qna_parser.js"] = __exports__;
+  __exports__["parse"] = parse;; __exports__["FALLBACK_EXAMPLES"] = FALLBACK_EXAMPLES;
+})();
+
+
+  /* ===== qna_panel.js ===== */
+  (function() {
+  const __exports__ = {};
+// js/qna_panel.js
+//
+// Renders Q&A answer cards in the bottom panel.
+//
+// Architecture: every answer is computed by the engine (no LLM). The
+// "narrative" is a template that slots in computed numbers. Every
+// answer also renders the underlying numbers + a "show work" toggle
+// so the user can audit.
+
+const engine = window.__ns__["engine_v3.js"] || {};;
+const { parse, FALLBACK_EXAMPLES } = window.__ns__["qna_parser.js"] || {};;
+const { attribute, DRIVER_ORDER } = window.__ns__["attribution.js"] || {};;
+
+const fmtM = (v) => {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return `$${v.toFixed(3)}M`;
+};
+const fmtPct = (v) => `${(v * 100).toFixed(1)}%`;
+const fmtPp = (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}pp`;
+
+function el(tag, attrs = {}, children = []) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k === "html") e.innerHTML = v;
+    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const c of [].concat(children)) {
+    if (c == null) continue;
+    if (typeof c === "string") e.appendChild(document.createTextNode(c));
+    else e.appendChild(c);
+  }
+  return e;
+}
+
+// --- Answer renderers ---
+
+function renderTrendCard(query, ctx) {
+  const { from, to, all_months, metric } = query;
+  const fromState = ctx.byMonth[from];
+  const toState = ctx.byMonth[to];
+  if (!fromState || !toState) return renderUnknown({ reason: "month_not_found", query });
+
+  const fromVal = fromState[metric] ?? fromState.total_vnb_m;
+  const toVal = toState[metric] ?? toState.total_vnb_m;
+  const delta = toVal - fromVal;
+  const deltaPct = fromVal > 0 ? delta / fromVal : 0;
+
+  // Build the sparkline data.
+  const months = (all_months && all_months.length) ? all_months : Object.keys(ctx.byMonth).sort();
+  const series = months.map((m) => ({ month: m, value: ctx.byMonth[m][metric] ?? ctx.byMonth[m].total_vnb_m }));
+  const spark = renderSparkline(series, metric);
+
+  // Narrative.
+  const metricLabel = metricLabelOf(metric);
+  const direction = delta >= 0 ? "increased" : "decreased";
+  const narrative = `${metricLabel} ${direction} from ${fmtM(fromVal)} (${from}) to ${fmtM(toVal)} (${to}), a ${deltaPct >= 0 ? "+" : ""}${fmtPct(deltaPct)} change.`;
+
+  return el("div", { class: "qna-card" }, [
+    el("div", { class: "qna-card__head" }, [
+      el("span", { class: "qna-card__type" }, "trend"),
+      el("span", { class: "qna-card__query" }, query.original),
+    ]),
+    el("div", { class: "qna-card__narrative" }, narrative),
+    spark,
+    el("table", { class: "qna-card__table" }, [
+      el("thead", {}, el("tr", {}, [el("th", {}, "Metric"), el("th", {}, "From"), el("th", {}, "To"), el("th", {}, "Δ"), el("th", {}, "Δ%")])),
+      el("tbody", {}, el("tr", {}, [
+        el("td", {}, metricLabelOf(metric)),
+        el("td", {}, fmtM(fromVal)),
+        el("td", {}, fmtM(toVal)),
+        el("td", { class: delta >= 0 ? "pos" : "neg" }, fmtM(delta)),
+        el("td", { class: delta >= 0 ? "pos" : "neg" }, fmtPct(deltaPct)),
+      ])),
+    ]),
+    el("details", { class: "qna-card__show-work" }, [
+      el("summary", {}, "show work"),
+      el("div", {}, `Engine call: engine.initEngine(data) → month snapshots`),
+      el("div", {}, `Values: fromState.${metric}=${fromVal.toFixed(6)}, toState.${metric}=${toVal.toFixed(6)}`),
+      el("div", {}, `Δ = to - from = ${delta.toFixed(6)}`),
+    ]),
+  ]);
+}
+
+function renderFactorsCard(query, ctx) {
+  const { from, to } = query;
+  const fromState = ctx.byMonth[from];
+  const toState = ctx.byMonth[to];
+  if (!fromState || !toState) return renderUnknown({ reason: "month_not_found", query });
+  const attr = attribute({ fromState, toState, knownMonths: Object.keys(ctx.byMonth), baselineData: ctx.baselineData });
+
+  // Headline narrative.
+  const totalDelta = attr.total_delta_m;
+  const totalPct = attr.baseline_vnb_m > 0 ? totalDelta / attr.baseline_vnb_m : 0;
+  const headline = `VNB moved from ${fmtM(attr.baseline_vnb_m)} (${from}) to ${fmtM(attr.target_vnb_m)} (${to}) — a ${totalDelta >= 0 ? "+" : ""}${fmtM(totalDelta)} (${fmtPct(totalPct)}) change.`;
+
+  // Factor table.
+  const rows = attr.drivers.map((d) => {
+    return el("tr", {}, [
+      el("td", {}, d.label),
+      el("td", { class: d.delta_m >= 0 ? "pos" : "neg" }, fmtM(d.delta_m)),
+      el("td", {}, fmtPct(attr.baseline_vnb_m > 0 ? d.delta_m / attr.baseline_vnb_m : 0)),
+      el("td", { class: "muted small" }, d.narrative),
+    ]);
+  });
+
+  return el("div", { class: "qna-card" }, [
+    el("div", { class: "qna-card__head" }, [
+      el("span", { class: "qna-card__type" }, "factors"),
+      el("span", { class: "qna-card__query" }, query.original),
+    ]),
+    el("div", { class: "qna-card__narrative" }, headline),
+    el("div", { class: "qna-card__narrative muted small" }, "Sequential decomposition — drivers applied in this order:"),
+    el("ol", { class: "qna-card__driver-order" }, attr.driver_order.map((k) => el("li", {}, k))),
+    el("table", { class: "qna-card__table" }, [
+      el("thead", {}, el("tr", {}, [
+        el("th", {}, "Driver"),
+        el("th", {}, "Δ VNB"),
+        el("th", {}, "Δ %"),
+        el("th", {}, "How"),
+      ])),
+      el("tbody", {}, rows),
+    ]),
+    el("details", { class: "qna-card__show-work" }, [
+      el("summary", {}, "show work"),
+      ...attr.caveats.map((c) => el("div", {}, c)),
+      el("div", {}, `Engine calls: 5 applyLevers({...}) invocations, one per driver, each starting from baseline.`),
+    ]),
+  ]);
+}
+
+function renderAttributeCard(query, ctx) {
+  const { driver, driver_pct, driver_dir, product_id, from, to } = query;
+  const fromState = ctx.byMonth[from];
+  const toState = ctx.byMonth[to];
+  if (!fromState || !toState) return renderUnknown({ reason: "month_not_found", query });
+  const attr = attribute({ fromState, toState, knownMonths: Object.keys(ctx.byMonth), baselineData: ctx.baselineData });
+  const driverLabel = DRIVER_LABEL[driver] || driver;
+  const targetDriver = driver ? attr.drivers.find((d) => d.key === driver) : null;
+  const pct = driver_pct ?? 0.10;
+  const sign = driver_dir ?? 1;
+  let headline;
+  if (targetDriver) {
+    headline = `${driverLabel} ${sign >= 0 ? "uplift" : "drag"} of ${fmtPp(pct * sign)} ${targetDriver.delta_m >= 0 ? "added" : "reduced"} ${fmtM(targetDriver.delta_m)} to VNB between ${from} and ${to}.`;
+  } else if (product_id) {
+    const fp = fromState.products?.[product_id]?.vnb_m || 0;
+    const tp = toState.products?.[product_id]?.vnb_m || 0;
+    headline = `${product_id} VNB moved from ${fmtM(fp)} to ${fmtM(tp)} between ${from} and ${to}. Full attribution below.`;
+  } else {
+    headline = `Full attribution of VNB change between ${from} and ${to}:`;
+  }
+
+  // If a product_id was named, also report the product's vnb contribution
+  // directly.
+  let productRow = null;
+  if (product_id) {
+    const fp = fromState.products?.[product_id]?.vnb_m || 0;
+    const tp = toState.products?.[product_id]?.vnb_m || 0;
+    productRow = el("tr", {}, [
+      el("td", {}, `${product_id} VNB`),
+      el("td", { class: (tp - fp) >= 0 ? "pos" : "neg" }, fmtM(tp - fp)),
+      el("td", {}, fmtPct(fp > 0 ? (tp - fp) / fp : 0)),
+      el("td", { class: "muted small" }, `${fmtM(fp)} → ${fmtM(tp)}`),
+    ]);
+  }
+
+  return el("div", { class: "qna-card" }, [
+    el("div", { class: "qna-card__head" }, [
+      el("span", { class: "qna-card__type" }, "attribute"),
+      el("span", { class: "qna-card__query" }, query.original),
+    ]),
+    el("div", { class: "qna-card__narrative" }, headline),
+    el("table", { class: "qna-card__table" }, [
+      el("thead", {}, el("tr", {}, [
+        el("th", {}, "Driver"),
+        el("th", {}, "Δ VNB"),
+        el("th", {}, "Δ %"),
+        el("th", {}, "How"),
+      ])),
+      el("tbody", {}, [
+        ...attr.drivers.map((d) => el("tr", {}, [
+          el("td", {}, d.label),
+          el("td", { class: d.delta_m >= 0 ? "pos" : "neg" }, fmtM(d.delta_m)),
+          el("td", {}, fmtPct(attr.baseline_vnb_m > 0 ? d.delta_m / attr.baseline_vnb_m : 0)),
+          el("td", { class: "muted small" }, d.narrative),
+        ])),
+        productRow,
+      ].filter(Boolean)),
+    ]),
+    el("details", { class: "qna-card__show-work" }, [
+      el("summary", {}, "show work"),
+      el("div", {}, `Engine: attribute() runs 5 applyLevers calls (one per driver) on the engine baseline.`),
+      el("div", {}, `Driver order: ${attr.driver_order.join(" → ")}`),
+      ...attr.caveats.map((c) => el("div", {}, c)),
+    ]),
+  ]);
+}
+
+function renderWhatIfCard(query, ctx) {
+  const { driver, driver_pct, product_id } = query;
+  const levers = { active_ratio_shift: 0, productivity_shift: 0, mix_shift: {} };
+  if (driver === "active_ratio_shift") levers.active_ratio_shift = driver_pct;
+  else if (driver === "productivity_shift") levers.productivity_shift = driver_pct;
+  else if (driver === "mix_shift") {
+    // If a product is named, add the share; otherwise distribute across
+    // all products proportionally.
+    if (product_id) {
+      levers.mix_shift[product_id] = Math.abs(driver_pct);
+    } else {
+      // Rebalance from a default — split from P002 (largest share).
+      levers.mix_shift.P002 = -Math.abs(driver_pct);
+      // Spread the gain across the other 3.
+      const others = ["P001", "P003", "P004"];
+      others.forEach((p) => (levers.mix_shift[p] = Math.abs(driver_pct) / others.length));
+    }
+  }
+  const r = engine.applyLevers(levers);
+  const baselineVnb = ctx.totals.vnb_m;
+  const projectedVnb = r.totals.vnb_m;
+  const delta = projectedVnb - baselineVnb;
+  const driverLabel = DRIVER_LABEL[driver] || driver;
+
+  const narrative = `${driverLabel} ${driver_pct >= 0 ? "uplift" : "drag"} of ${fmtPp(driver_pct)} → VNB projected at ${fmtM(projectedVnb)} (${delta >= 0 ? "+" : ""}${fmtM(delta)} vs baseline ${fmtM(baselineVnb)}).`;
+
+  return el("div", { class: "qna-card" }, [
+    el("div", { class: "qna-card__head" }, [
+      el("span", { class: "qna-card__type" }, "what-if"),
+      el("span", { class: "qna-card__query" }, query.original),
+    ]),
+    el("div", { class: "qna-card__narrative" }, narrative),
+    el("table", { class: "qna-card__table" }, [
+      el("thead", {}, el("tr", {}, [el("th", {}, "Metric"), el("th", {}, "Baseline"), el("th", {}, "Projected"), el("th", {}, "Δ")])),
+      el("tbody", {}, [
+        el("tr", {}, [
+          el("td", {}, "Total APE ($M)"),
+          el("td", {}, fmtM(ctx.totals.ape_m)),
+          el("td", {}, fmtM(r.totals.ape_m)),
+          el("td", { class: (r.totals.ape_m - ctx.totals.ape_m) >= 0 ? "pos" : "neg" }, fmtM(r.totals.ape_m - ctx.totals.ape_m)),
+        ]),
+        el("tr", {}, [
+          el("td", {}, "Total VNB ($M)"),
+          el("td", {}, fmtM(baselineVnb)),
+          el("td", {}, fmtM(projectedVnb)),
+          el("td", { class: delta >= 0 ? "pos" : "neg" }, fmtM(delta)),
+        ]),
+        el("tr", {}, [
+          el("td", {}, "Blended Margin"),
+          el("td", {}, fmtPct(ctx.totals.margin)),
+          el("td", {}, fmtPct(r.totals.margin)),
+          el("td", { class: "muted small" }, fmtPp(r.totals.margin - ctx.totals.margin)),
+        ]),
+      ]),
+    ]),
+    el("details", { class: "qna-card__show-work" }, [
+      el("summary", {}, "show work"),
+      el("div", {}, `Engine: applyLevers(${JSON.stringify(levers)})`),
+      el("div", {}, `Returned: ${JSON.stringify(r.totals)}`),
+    ]),
+  ]);
+}
+
+function renderCompareCard(query, ctx) {
+  const { periods, metric } = query;
+  if (!periods || periods.length < 2) return renderUnknown({ reason: "missing_periods", query });
+  const rows = periods.map((p) => {
+    const s = ctx.byMonth[p];
+    if (!s) return el("tr", {}, [el("td", {}, p), el("td", { colspan: 3 }, "(not in engine data)")]);
+    const v = s[metric] ?? s.total_vnb_m;
+    return el("tr", {}, [
+      el("td", {}, p),
+      el("td", {}, fmtM(s.total_ape_m)),
+      el("td", {}, fmtM(s.total_vnb_m)),
+      el("td", {}, fmtPct(s.margin)),
+    ]);
+  });
+  return el("div", { class: "qna-card" }, [
+    el("div", { class: "qna-card__head" }, [
+      el("span", { class: "qna-card__type" }, "compare"),
+      el("span", { class: "qna-card__query" }, query.original),
+    ]),
+    el("div", { class: "qna-card__narrative" }, `Comparing ${periods.length} periods on ${metricLabelOf(metric)}.`),
+    el("table", { class: "qna-card__table" }, [
+      el("thead", {}, el("tr", {}, [
+        el("th", {}, "Period"),
+        el("th", {}, "APE"),
+        el("th", {}, "VNB"),
+        el("th", {}, "Margin"),
+      ])),
+      el("tbody", {}, rows),
+    ]),
+  ]);
+}
+
+function renderShowPeriodCard(query, ctx) {
+  const s = ctx.byMonth[query.period];
+  if (!s) return renderUnknown({ reason: "month_not_found", query });
+  return el("div", { class: "qna-card" }, [
+    el("div", { class: "qna-card__head" }, [
+      el("span", { class: "qna-card__type" }, "show-period"),
+      el("span", { class: "qna-card__query" }, query.original),
+    ]),
+    el("div", { class: "qna-card__narrative" }, `${query.period}: APE ${fmtM(s.total_ape_m)}, VNB ${fmtM(s.total_vnb_m)}, margin ${fmtPct(s.margin)}.`),
+    el("table", { class: "qna-card__table" }, [
+      el("thead", {}, el("tr", {}, [el("th", {}, "Channel"), el("th", {}, "APE"), el("th", {}, "VNB"), el("th", {}, "Active")])),
+      el("tbody", {}, Object.entries(s.channels).map(([chId, c]) =>
+        el("tr", {}, [
+          el("td", {}, chId),
+          el("td", {}, fmtM(c.ape_m)),
+          el("td", {}, fmtM(c.vnb_m)),
+          el("td", {}, `${c.active}`),
+        ])
+      )),
+    ]),
+  ]);
+}
+
+function renderUnknown({ reason, query }) {
+  return el("div", { class: "qna-card qna-card--unknown" }, [
+    el("div", { class: "qna-card__head" }, [
+      el("span", { class: "qna-card__type" }, "no-read"),
+    ]),
+    el("div", { class: "qna-card__narrative" }, `I can't read that — engine returned no pattern match (${reason || "no_pattern_match"}). Try one of these:`),
+    el("ul", { class: "qna-card__examples" }, FALLBACK_EXAMPLES.map((ex) =>
+      el("li", {}, el("button", { class: "qna-card__example-btn", "data-example": ex }, ex))
+    )),
+  ]);
+}
+
+const DRIVER_LABEL = {
+  active_ratio_shift: "Active Ratio",
+  productivity_shift: "Productivity per Active Agent",
+  mix_shift: "Product Mix",
+};
+
+function metricLabelOf(metric) {
+  switch (metric) {
+    case "vnb_m": return "VNB";
+    case "ape_m": return "APE";
+    case "margin": return "VNB Margin";
+    case "active_ratio": return "Active Ratio";
+    case "productivity": return "Productivity";
+    default: return metric;
+  }
+}
+
+function renderSparkline(series, metric) {
+  if (!series.length) return el("div", {}, "(no data)");
+  const W = 480, H = 90, P = 6;
+  const vals = series.map((s) => s.value);
+  const minV = Math.min(...vals), maxV = Math.max(...vals);
+  const span = (maxV - minV) || 1;
+  const xStep = (W - 2 * P) / Math.max(1, series.length - 1);
+  const points = series.map((s, i) => {
+    const x = P + i * xStep;
+    const y = H - P - ((s.value - minV) / span) * (H - 2 * P);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const svg = `
+    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="1.5" />
+      ${series.map((s, i) => {
+        const x = P + i * xStep;
+        const y = H - P - ((s.value - minV) / span) * (H - 2 * P);
+        return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="currentColor" />`;
+      }).join("")}
+    </svg>`;
+  const wrap = el("div", { class: "qna-card__sparkline" });
+  wrap.innerHTML = svg;
+  // Add the x-axis labels as text.
+  const label = el("div", { class: "qna-card__sparkline-labels muted small" },
+    `${series[0].month} → ${series[series.length - 1].month} · min ${fmtM(minV)} · max ${fmtM(maxV)}`);
+  return el("div", {}, [wrap, label]);
+}
+
+// --- Public entry point ---
+
+function mountQnaPanel({ container, baselineData, months, totals }) {
+  // Build the index by month for the answer renderers.
+  const byMonth = {};
+  for (const m of months) byMonth[m.month] = m;
+  const ctx = { baselineData, months, totals, byMonth };
+
+  const form = el("form", { class: "qna-form" });
+  const input = el("input", {
+    type: "text", placeholder: "Ask in plain English… (e.g. 'How has VNB changed from Jan to Jun?')",
+    class: "qna-form__input", id: "qna-input", autocomplete: "off",
+  });
+  const submit = el("button", { type: "submit", class: "qna-form__submit" }, "Ask");
+  form.appendChild(input);
+  form.appendChild(submit);
+
+  const output = el("div", { class: "qna-output", id: "qna-output" });
+
+  container.appendChild(el("div", { class: "qna-panel__head" }, [
+    el("h2", {}, "Ask the engine"),
+    el("p", { class: "muted small" }, "Every answer is computed from the data — no LLM in the path. The 'show work' toggle shows the engine calls."),
+  ]));
+  container.appendChild(form);
+  container.appendChild(output);
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    submitAnswer();
+  });
+
+  // Click-to-fill example chips.
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-example]");
+    if (!btn) return;
+    input.value = btn.getAttribute("data-example");
+    submitAnswer();
+  });
+
+  function submitAnswer() {
+    const text = input.value.trim();
+    if (!text) return;
+    const knownMonths = Object.keys(byMonth).sort();
+    const query = parse(text, knownMonths);
+    let card;
+    switch (query.type) {
+      case "trend": card = renderTrendCard(query, ctx); break;
+      case "factors": card = renderFactorsCard(query, ctx); break;
+      case "attribute": card = renderAttributeCard(query, ctx); break;
+      case "whatif": card = renderWhatIfCard(query, ctx); break;
+      case "compare": card = renderCompareCard(query, ctx); break;
+      case "show_period": card = renderShowPeriodCard(query, ctx); break;
+      default: card = renderUnknown({ reason: query.reason, query });
+    }
+    // Clear output and render.
+    output.innerHTML = "";
+    output.appendChild(card);
+  }
+
+  // Show a hint with the first example on mount.
+  output.appendChild(el("div", { class: "qna-hint" }, [
+    el("div", { class: "muted small" }, "Try one of these to start:"),
+    el("ul", { class: "qna-card__examples" }, FALLBACK_EXAMPLES.map((ex) =>
+      el("li", {}, el("button", { class: "qna-card__example-btn", "data-example": ex }, ex))
+    )),
+  ]));
+}
+
+  window.__ns__["qna_panel.js"] = __exports__;
+  __exports__["mountQnaPanel"] = mountQnaPanel;
+})();
+
+
+  /* ===== qna_boot.js ===== */
+  (function() {
+  const __exports__ = {};
+// js/qna_boot.js
+//
+// Boot the Q&A panel independently of the main v2 page. Loads v3 data,
+// runs the v3 engine, mounts the panel into a target DOM element.
+
+const engine = window.__ns__["engine_v3.js"] || {};;
+const { mountQnaPanel } = window.__ns__["qna_panel.js"] || {};;
+
+async function bootQnaPanel({ containerId }) {
+  const container = document.getElementById(containerId);
+  if (!container) {
+    console.warn(`[qna-boot] container #${containerId} not found`);
+    return;
+  }
+  let data;
+  try {
+    const resp = await fetch("data/bp-tables-test-v3.json");
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    data = await resp.json();
+  } catch (e) {
+    container.innerHTML = `<div class="qna-card qna-card--unknown">
+      <div class="qna-card__head"><span class="qna-card__type">error</span></div>
+      <div class="qna-card__narrative">Failed to load v3 data: ${e.message}</div>
+    </div>`;
+    return;
+  }
+  const init = engine.initEngine(data);
+  mountQnaPanel({
+    container,
+    baselineData: data,
+    months: init.months,
+    totals: init.totals,
+  });
+}
+
+  window.__ns__["qna_boot.js"] = __exports__;
+  __exports__["bootQnaPanel"] = bootQnaPanel;
 })();
 
 
